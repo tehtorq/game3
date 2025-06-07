@@ -29,6 +29,7 @@ struct Stage {
     game: Game,
     camera: Camera,
     input: InputState,
+    paused: bool,
 }
 
 #[derive(Default)]
@@ -116,21 +117,24 @@ impl Stage {
             game: Game::new(),
             camera: Camera::new(),
             input: InputState::default(),
+            paused: false,
         }
     }
 }
 
 impl EventHandler for Stage {
     fn update(&mut self) {
-        let dt = 1.0 / 60.0;
-        self.game.update(
-            self.input.left,
-            self.input.right,
-            self.input.up,
-            self.input.down,
-            self.input.shoot,
-            dt
-        );
+        if !self.paused {
+            let dt = 1.0 / 60.0;
+            self.game.update(
+                self.input.left,
+                self.input.right,
+                self.input.up,
+                self.input.down,
+                self.input.shoot,
+                dt
+            );
+        }
     }
 
     fn draw(&mut self) {
@@ -218,6 +222,7 @@ impl EventHandler for Stage {
             KeyCode::Down | KeyCode::S => self.input.down = true,
             KeyCode::Space => self.input.shoot = true,
             KeyCode::Escape => window::request_quit(),
+            KeyCode::P => self.paused = !self.paused,
             _ => {}
         }
     }
