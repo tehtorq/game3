@@ -124,8 +124,8 @@ impl Game {
     }
 
     fn update_terrain_chunks(&mut self) {
-        let chunk_size = 600.0;
-        let view_distance = 4; // Number of chunks in each direction
+        let chunk_size = 80.0;
+        let view_distance = 24; // Number of chunks in each direction
         
         // Calculate which chunk the player is in
         let player_chunk_x = (self.player.pos.x / chunk_size).floor() as i32;

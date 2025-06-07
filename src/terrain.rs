@@ -20,10 +20,10 @@ impl TerrainChunk {
     }
     
     fn height_at(&self, x: f32, z: f32) -> f32 {
-        let scale1 = 0.003;
+        let scale1 = 0.002;  // Larger scale = gentler hills
         let scale2 = 0.007;
         let scale3 = 0.015;
-        let height_scale = 40.0;
+        let height_scale = 60.0;  // Increased height variation
         
         // Multiple octaves of noise for more interesting terrain
         let h1 = (x * scale1).sin() * (z * scale1).cos() * height_scale;
@@ -36,23 +36,34 @@ impl TerrainChunk {
 
 impl Drawable for TerrainChunk {
     fn draw(&self, renderer: &mut Renderer) {
-        let terrain_y = 0.0; // Put terrain at y=0 for debugging
+        let terrain_y_base = -30.0; // Base terrain height
         
-        // Draw a simple grid square for each chunk
-        let size = 300.0;
+        // Draw a simple grid square for each chunk (same as before)
+        let size = 40.0;
         let x1 = self.x_offset - size;
         let x2 = self.x_offset + size;
         let z1 = self.z_offset - size;
         let z2 = self.z_offset + size;
         
-        // Draw outline of chunk
-        renderer.draw_line(Vec3::new(x1, terrain_y, z1), Vec3::new(x2, terrain_y, z1));
-        renderer.draw_line(Vec3::new(x2, terrain_y, z1), Vec3::new(x2, terrain_y, z2));
-        renderer.draw_line(Vec3::new(x2, terrain_y, z2), Vec3::new(x1, terrain_y, z2));
-        renderer.draw_line(Vec3::new(x1, terrain_y, z2), Vec3::new(x1, terrain_y, z1));
+        // Draw outline of chunk with height
+        let y1z1 = self.height_at(x1, z1) + terrain_y_base;
+        let y2z1 = self.height_at(x2, z1) + terrain_y_base;
+        let y2z2 = self.height_at(x2, z2) + terrain_y_base;
+        let y1z2 = self.height_at(x1, z2) + terrain_y_base;
         
-        // Draw cross in middle
-        renderer.draw_line(Vec3::new(x1, terrain_y, self.z_offset), Vec3::new(x2, terrain_y, self.z_offset));
-        renderer.draw_line(Vec3::new(self.x_offset, terrain_y, z1), Vec3::new(self.x_offset, terrain_y, z2));
+        renderer.draw_line(Vec3::new(x1, y1z1, z1), Vec3::new(x2, y2z1, z1));
+        renderer.draw_line(Vec3::new(x2, y2z1, z1), Vec3::new(x2, y2z2, z2));
+        renderer.draw_line(Vec3::new(x2, y2z2, z2), Vec3::new(x1, y1z2, z2));
+        renderer.draw_line(Vec3::new(x1, y1z2, z2), Vec3::new(x1, y1z1, z1));
+        
+        // Draw cross in middle with height
+        let ymid = self.height_at(self.x_offset, self.z_offset) + terrain_y_base;
+        let y1mid = self.height_at(x1, self.z_offset) + terrain_y_base;
+        let y2mid = self.height_at(x2, self.z_offset) + terrain_y_base;
+        let ymid1 = self.height_at(self.x_offset, z1) + terrain_y_base;
+        let ymid2 = self.height_at(self.x_offset, z2) + terrain_y_base;
+        
+        renderer.draw_line(Vec3::new(x1, y1mid, self.z_offset), Vec3::new(x2, y2mid, self.z_offset));
+        renderer.draw_line(Vec3::new(self.x_offset, ymid1, z1), Vec3::new(self.x_offset, ymid2, z2));
     }
 }
