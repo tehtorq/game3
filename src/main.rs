@@ -5,6 +5,7 @@ mod math;
 mod vertex;
 mod renderer;
 mod terrain;
+mod terrain_instanced;
 mod player;
 mod enemy;
 mod bullet;
@@ -17,6 +18,7 @@ use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
 use camera::Camera;
 use game::Game;
+use terrain_instanced::InstancedTerrain;
 
 const SCREEN_WIDTH: f32 = 1600.0;
 const SCREEN_HEIGHT: f32 = 1200.0;
@@ -25,13 +27,14 @@ struct Stage {
     ctx: Box<dyn RenderingBackend>,
     line_pipeline: Pipeline,
     triangle_pipeline: Pipeline,
+    terrain_pipeline: Pipeline,
     bindings: Bindings,
+    terrain_bindings: Bindings,
     game: Game,
     camera: Camera,
     input: InputState,
     paused: bool,
-    terrain_initialized: bool,
-    terrain_chunk_bindings: std::collections::HashMap<(i32, i32), Bindings>,
+    instanced_terrain: Option<InstancedTerrain>,
 }
 
 #[derive(Default)]
@@ -53,6 +56,14 @@ impl Stage {
                 fragment: shader::FRAGMENT,
             },
             shader::meta()
+        ).unwrap();
+        
+        let terrain_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: shader::VERTEX_INSTANCED_TERRAIN,
+                fragment: shader::FRAGMENT,
+            },
+            shader::meta_terrain()
         ).unwrap();
         
         let line_pipeline = ctx.new_pipeline(
@@ -84,12 +95,41 @@ impl Stage {
                 VertexAttribute::new("pos", VertexFormat::Float3),
                 VertexAttribute::new("barycentric", VertexFormat::Float3),
             ],
-            shader,
+            shader.clone(),
             PipelineParams {
                 primitive_type: PrimitiveType::Triangles,
                 depth_test: Comparison::LessOrEqual,
                 depth_write: true,
-                cull_face: CullFace::Back,
+                cull_face: CullFace::Nothing, // Disable culling for debugging
+                ..Default::default()
+            },
+        );
+        
+        // Create terrain pipeline with instancing
+        let terrain_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout {
+                    step_func: VertexStep::PerVertex,
+                    stride: 24, // 6 floats * 4 bytes
+                    ..Default::default()
+                },
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    stride: 8, // 2 floats * 4 bytes for instance offset
+                    ..Default::default()
+                }
+            ],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+                VertexAttribute::with_buffer("instance_offset", VertexFormat::Float2, 1),
+            ],
+            terrain_shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
+                cull_face: CullFace::Nothing, // Disable culling for debugging
                 ..Default::default()
             },
         );
@@ -110,18 +150,31 @@ impl Stage {
             index_buffer,
             images: vec![],
         };
+        
+        // Create dummy terrain bindings - will be filled when terrain is created
+        let dummy_buffer = ctx.new_buffer(
+            BufferType::IndexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<u32>(1)
+        );
+        let terrain_bindings = Bindings {
+            vertex_buffers: vec![],
+            index_buffer: dummy_buffer,
+            images: vec![],
+        };
 
         Self {
             ctx,
             line_pipeline,
             triangle_pipeline,
+            terrain_pipeline,
             bindings,
+            terrain_bindings,
             game: Game::new(),
             camera: Camera::new(),
             input: InputState::default(),
             paused: false,
-            terrain_initialized: false,
-            terrain_chunk_bindings: std::collections::HashMap::new(),
+            instanced_terrain: None,
         }
     }
 }
@@ -138,23 +191,28 @@ impl EventHandler for Stage {
                 self.input.shoot,
                 dt
             );
-            
-            // Update terrain chunks with rendering context
-            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-            unsafe {
-                self.game.update_terrain_chunks(&mut *ctx_ptr);
-            }
         }
     }
 
     fn draw(&mut self) {
-        // Initialize terrain chunks on first draw
-        if !self.terrain_initialized {
+        // Initialize instanced terrain on first draw
+        if self.instanced_terrain.is_none() {
+            println!("Initializing instanced terrain...");
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                self.game.update_terrain_chunks(&mut *ctx_ptr);
+                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 5); // Smaller for debugging
+                
+                // Create terrain bindings
+                self.terrain_bindings = Bindings {
+                    vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
+                    index_buffer: terrain.index_buffer(),
+                    images: vec![terrain.height_texture()],
+                };
+                
+                println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
+                
+                self.instanced_terrain = Some(terrain);
             }
-            self.terrain_initialized = true;
         }
         
         // Set up view and projection matrices
@@ -171,73 +229,21 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
-        // Draw terrain chunks using their GPU buffers
-        self.ctx.apply_pipeline(&self.triangle_pipeline);
-        
-        let player_pos = self.game.player.pos;
-        let max_draw_distance = 3200.0;
-        
-        // Calculate camera position (behind and above player)
-        let camera_offset = Vec3::new(
-            self.game.player.rotation.sin() * 150.0,
-            80.0,
-            self.game.player.rotation.cos() * 150.0
-        );
-        let camera_pos = player_pos + camera_offset;
-        
-        // Get camera forward direction (looking at player)
-        let camera_forward = (player_pos - camera_pos).normalize();
-        
-        // FOV parameters (60 degrees FOV + some margin)
-        let fov_cos = (60.0f32 + 20.0).to_radians().cos();
-        
-        // Set uniforms once for all terrain
-        self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 0.0]))); // Green
-        
-        for chunk in &self.game.terrain_chunks {
-            let chunk_center = Vec3::new(chunk.x_offset, -30.0, chunk.z_offset);
+        // Draw instanced terrain
+        if let Some(terrain) = &self.instanced_terrain {
+            println!("Drawing terrain with {} instances, {} indices per instance", terrain.instance_count(), terrain.index_count());
             
-            // Calculate chunk bounds (chunks are 160x160)
-            let chunk_radius = 113.14;
+            self.ctx.apply_pipeline(&self.terrain_pipeline);
+            self.ctx.apply_bindings(&self.terrain_bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::UniformsTerrain::new(
+                mvp, 
+                [0.0, 1.0, 0.0], // Bright green for visibility
+                terrain.terrain_scale(),
+                0.0 // terrain_y_base - start at Y=0
+            )));
             
-            // Vector from camera to chunk
-            let to_chunk = chunk_center - camera_pos;
-            let distance = to_chunk.length();
-            
-            // Skip if too far
-            if distance > max_draw_distance + chunk_radius {
-                continue;
-            }
-            
-            // Improved frustum culling
-            if distance > chunk_radius * 2.0 {
-                let to_chunk_normalized = to_chunk.normalize();
-                let dot = camera_forward.dot(to_chunk_normalized);
-                
-                // Account for chunk size in frustum test
-                let angle_adjustment = (chunk_radius / distance).atan();
-                let adjusted_fov_cos = (fov_cos.acos() + angle_adjustment).cos();
-                
-                if dot < adjusted_fov_cos {
-                    continue;
-                }
-            }
-            
-            // Get chunk coordinates for caching
-            let chunk_x = (chunk.x_offset / 160.0).round() as i32;
-            let chunk_z = (chunk.z_offset / 160.0).round() as i32;
-            let chunk_key = (chunk_x, chunk_z);
-            
-            // Get or create bindings for this chunk
-            let chunk_bindings = self.terrain_chunk_bindings.entry(chunk_key)
-                .or_insert_with(|| Bindings {
-                    vertex_buffers: vec![chunk.vertex_buffer()],
-                    index_buffer: chunk.index_buffer(),
-                    images: vec![],
-                });
-            
-            self.ctx.apply_bindings(chunk_bindings);
-            self.ctx.draw(0, chunk.index_count(), 1);
+            // Draw all terrain instances
+            self.ctx.draw(0, terrain.index_count(), terrain.instance_count());
         }
         
         // Draw enemies in red

@@ -1,12 +1,10 @@
 use rand::prelude::*;
 use std::f32::consts::PI;
-use miniquad::RenderingBackend;
 
 use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
 use crate::bullet::Bullet;
 use crate::particle::Particle;
-use crate::terrain::TerrainChunk;
 use crate::renderer::Renderer;
 
 pub struct Game {
@@ -14,7 +12,6 @@ pub struct Game {
     pub enemies: Vec<Enemy>,
     pub bullets: Vec<Bullet>,
     pub particles: Vec<Particle>,
-    pub terrain_chunks: Vec<TerrainChunk>,
     pub enemy_spawn_timer: f32,
     pub shoot_cooldown: f32,
     pub wave: u32,
@@ -28,14 +25,12 @@ impl Game {
             enemies: Vec::new(),
             bullets: Vec::new(),
             particles: Vec::new(),
-            terrain_chunks: Vec::new(),
             enemy_spawn_timer: 0.0,
             shoot_cooldown: 0.0,
             wave: 1,
             score: 0,
         };
         
-        // Don't create terrain chunks here - they need the rendering context
         game.spawn_wave();
         
         game
@@ -44,8 +39,6 @@ impl Game {
     pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, dt: f32) {
         // Update player
         self.player.update(left, right, up, down, dt);
-        
-        // Terrain chunks are now managed in main.rs
         
         // Handle shooting
         if shoot && self.shoot_cooldown <= 0.0 {
@@ -95,46 +88,6 @@ impl Game {
         // This method can remain empty as we're handling drawing in main.rs now
     }
 
-    pub fn update_terrain_chunks(&mut self, ctx: &mut dyn RenderingBackend) {
-        let chunk_size = 160.0;
-        let view_distance = 48; // Number of chunks in each direction (increased for maximum view)
-        
-        // Calculate which chunk the player is in
-        let player_chunk_x = (self.player.pos.x / chunk_size).floor() as i32;
-        let player_chunk_z = (self.player.pos.z / chunk_size).floor() as i32;
-        
-        // Create a set of chunks that should exist
-        let mut needed_chunks = std::collections::HashSet::new();
-        for dx in -view_distance..=view_distance {
-            for dz in -view_distance..=view_distance {
-                needed_chunks.insert((player_chunk_x + dx, player_chunk_z + dz));
-            }
-        }
-        
-        // Remove chunks that are too far away
-        self.terrain_chunks.retain(|chunk| {
-            let chunk_x = (chunk.x_offset / chunk_size).round() as i32;
-            let chunk_z = (chunk.z_offset / chunk_size).round() as i32;
-            needed_chunks.contains(&(chunk_x, chunk_z))
-        });
-        
-        // Add missing chunks
-        for &(chunk_x, chunk_z) in &needed_chunks {
-            let x_offset = chunk_x as f32 * chunk_size;
-            let z_offset = chunk_z as f32 * chunk_size;
-            
-            // Check if this chunk already exists
-            let exists = self.terrain_chunks.iter().any(|chunk| {
-                let existing_x = (chunk.x_offset / chunk_size).round() as i32;
-                let existing_z = (chunk.z_offset / chunk_size).round() as i32;
-                existing_x == chunk_x && existing_z == chunk_z
-            });
-            
-            if !exists {
-                self.terrain_chunks.push(TerrainChunk::new(x_offset, z_offset, ctx));
-            }
-        }
-    }
 
     fn spawn_wave(&mut self) {
         let mut rng = thread_rng();
