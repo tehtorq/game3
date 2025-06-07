@@ -150,6 +150,7 @@ impl EventHandler for Stage {
             KeyCode::Up | KeyCode::W => self.input.up = true,
             KeyCode::Down | KeyCode::S => self.input.down = true,
             KeyCode::Space => self.input.shoot = true,
+            KeyCode::Escape => window::request_quit(),
             _ => {}
         }
     }
