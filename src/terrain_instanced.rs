@@ -135,6 +135,9 @@ impl InstancedTerrain {
     fn create_height_texture(ctx: &mut dyn RenderingBackend, size: u32, terrain_scale: f32) -> TextureId {
         let mut height_data = vec![0u8; (size * size * 4) as usize]; // RGBA format
         
+        let mut min_height = f32::MAX;
+        let mut max_height = f32::MIN;
+        
         // Generate height values
         for y in 0..size {
             for x in 0..size {
@@ -146,6 +149,8 @@ impl InstancedTerrain {
                 let world_z = (v - 0.5) * terrain_scale;
                 
                 let height = Self::height_at(world_x, world_z);
+                min_height = min_height.min(height);
+                max_height = max_height.max(height);
                 
                 // Normalize height to 0-255 range
                 // Assuming height ranges from -100 to 100
@@ -158,6 +163,8 @@ impl InstancedTerrain {
                 height_data[idx + 3] = 255;       // A
             }
         }
+        
+        println!("Height texture stats: min={:.2}, max={:.2}", min_height, max_height);
         
         let texture = ctx.new_texture(
             TextureAccess::Static,

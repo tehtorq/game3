@@ -231,13 +231,13 @@ impl EventHandler for Stage {
         
         // Draw instanced terrain
         if let Some(terrain) = &self.instanced_terrain {
-            println!("Drawing terrain with {} instances, {} indices per instance", terrain.instance_count(), terrain.index_count());
+            // Drawing terrain
             
             self.ctx.apply_pipeline(&self.terrain_pipeline);
             self.ctx.apply_bindings(&self.terrain_bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::UniformsTerrain::new(
                 mvp, 
-                [0.0, 1.0, 0.0], // Bright green for visibility
+                [0.0, 1.0, 0.0], // Green
                 terrain.terrain_scale(),
                 0.0 // terrain_y_base - start at Y=0
             )));

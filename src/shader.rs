@@ -29,8 +29,11 @@ uniform float terrain_y_base;
 void main() {
     v_barycentric = barycentric;
     
-    // Simple test - just offset the base mesh position
-    vec3 world_pos = vec3(pos.x + instance_offset.x, pos.y + 30.0, pos.z + instance_offset.y);
+    // Calculate world position with instance offset
+    vec3 world_pos = vec3(pos.x + instance_offset.x, pos.y + 20.0, pos.z + instance_offset.y);
+    
+    // Debug: Add a small height variation based on position
+    world_pos.y += sin(world_pos.x * 0.01) * 10.0;
     
     gl_Position = mvp * vec4(world_pos, 1.0);
 }"#;
@@ -54,7 +57,7 @@ void main() {
         float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
         
         // Draw edges brighter
-        if (minBary < 0.02) {
+        if (minBary < 0.05) {
             gl_FragColor = vec4(color, 1.0); // Bright version for edges
         }
     }
