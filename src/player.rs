@@ -37,9 +37,9 @@ impl Player {
         
         // Update banking based on turning
         let target_banking = if left {
-            0.5
-        } else if right {
             -0.5
+        } else if right {
+            0.5
         } else {
             0.0
         };
