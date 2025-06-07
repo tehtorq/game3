@@ -75,9 +75,10 @@ varying float v_height;
 
 void main() {
     // Calculate height-based brightness (higher = brighter)
-    float height_factor = (v_height - 0.0) / 100.0; // Normalize height to 0-1 range
+    // Terrain can range from about -420 to +460, normalize to this range
+    float height_factor = (v_height + 420.0) / 880.0; // Normalize to 0-1 range
     height_factor = clamp(height_factor, 0.0, 1.0);
-    height_factor = 0.3 + height_factor * 0.7; // Map to 0.3-1.0 range
+    height_factor = 0.2 + height_factor * 0.8; // Map to 0.2-1.0 range for more contrast
     
     vec3 adjusted_color = color * height_factor;
     

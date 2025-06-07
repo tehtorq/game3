@@ -2,6 +2,38 @@ use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
 
+// Calculate terrain height at a given position (matches shader calculation)
+fn terrain_height_at(x: f32, z: f32) -> f32 {
+    let base_y = 20.0;
+    
+    // Large-scale terrain features - very broad valleys and mountains (4x amplified)
+    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
+    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
+    
+    // Create base terrain with gentle slopes
+    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
+    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
+    
+    // Create a "roughness map" that determines where bumpy areas appear
+    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
+    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
+    roughness = (roughness + 1.5) / 3.0; // Normalize to ~0-1 range
+    
+    // Make roughness more sparse by thresholding (approximating smoothstep)
+    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
+    
+    // Bumpy terrain details
+    let mut bumps = 0.0;
+    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
+    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
+    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
+    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
+    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
+    
+    // Combine all terrain features
+    base_y + large_scale + gentle + (bumps * roughness)
+}
+
 #[derive(Clone)]
 pub struct Player {
     pub pos: Vec3,
@@ -75,8 +107,16 @@ impl Player {
         
         self.pos += self.vel * dt;
         
-        // Constrain player height
-        self.pos.y = self.pos.y.clamp(20.0, 300.0);
+        // Constrain player height based on terrain below
+        let terrain_below = terrain_height_at(self.pos.x, self.pos.z);
+        let min_height = terrain_below + 10.0; // Stay at least 10 units above terrain
+        
+        // Maximum terrain height is roughly base_y (20) + max amplitude (440) = 460
+        // But to be safe, let's calculate a reasonable max flight height
+        let max_amplitude = 440.0; // Approximate maximum terrain variation
+        let flight_ceiling = terrain_below + max_amplitude;
+        
+        self.pos.y = self.pos.y.clamp(min_height, flight_ceiling);
     }
 }
 
