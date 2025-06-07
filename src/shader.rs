@@ -20,6 +20,7 @@ attribute vec3 barycentric;
 attribute vec2 instance_offset;
 
 varying vec3 v_barycentric;
+varying float v_height;
 
 uniform mat4 mvp;
 uniform float terrain_scale;
@@ -31,10 +32,54 @@ void main() {
     // Calculate world position with instance offset
     vec3 world_pos = vec3(pos.x + instance_offset.x, pos.y + 20.0, pos.z + instance_offset.y);
     
-    // Debug: Add a small height variation based on position
-    world_pos.y += sin(world_pos.x * 0.01) * 10.0;
+    // Use one sine wave to modulate the amplitude of others
+    float amplitude_mod = (sin(world_pos.x * 0.002 + world_pos.z * 0.003) + 1.0) * 0.5; // 0 to 1
+    amplitude_mod = amplitude_mod * amplitude_mod; // Square it to make variation more dramatic
+    
+    // Apply height with variable amplitude
+    float base_height = sin(world_pos.x * 0.01) * sin(world_pos.z * 0.012) * 80.0;
+    world_pos.y += base_height * amplitude_mod;
+    
+    // Add some smaller detail
+    world_pos.y += sin(world_pos.x * 0.05) * sin(world_pos.z * 0.05) * 5.0;
+    
+    // Pass height to fragment shader
+    v_height = world_pos.y;
     
     gl_Position = mvp * vec4(world_pos, 1.0);
+}"#;
+
+pub const FRAGMENT_TERRAIN: &str = r#"#version 100
+precision mediump float;
+
+uniform vec3 color;
+
+varying vec3 v_barycentric;
+varying float v_height;
+
+void main() {
+    // Calculate height-based brightness (higher = brighter)
+    float height_factor = (v_height - 0.0) / 100.0; // Normalize height to 0-1 range
+    height_factor = clamp(height_factor, 0.0, 1.0);
+    height_factor = 0.3 + height_factor * 0.7; // Map to 0.3-1.0 range
+    
+    vec3 adjusted_color = color * height_factor;
+    
+    // If barycentric coordinates are all zero, this is a line vertex
+    if (v_barycentric.x == 0.0 && v_barycentric.y == 0.0 && v_barycentric.z == 0.0) {
+        gl_FragColor = vec4(adjusted_color, 1.0);
+    } else {
+        // Show filled triangles with darker color
+        gl_FragColor = vec4(adjusted_color * 0.5, 1.0); // Darker version for filled areas
+        
+        // Calculate distance to nearest edge for triangles
+        float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
+        
+        // Draw edges brighter
+        if (minBary < 0.05) {
+            gl_FragColor = vec4(adjusted_color, 1.0); // Bright version for edges
+        }
+    }
 }"#;
 
 pub const FRAGMENT: &str = r#"#version 100

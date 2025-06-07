@@ -65,7 +65,7 @@ impl Stage {
         let terrain_shader = ctx.new_shader(
             ShaderSource::Glsl {
                 vertex: shader::VERTEX_INSTANCED_TERRAIN,
-                fragment: shader::FRAGMENT,
+                fragment: shader::FRAGMENT_TERRAIN,
             },
             shader::meta_terrain()
         ).unwrap();
@@ -223,7 +223,7 @@ impl EventHandler for Stage {
             println!("Initializing instanced terrain...");
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 320); // 64x original view distance
+                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 160); // 32x original view distance
                 
                 // Create terrain bindings
                 self.terrain_bindings = Bindings {
