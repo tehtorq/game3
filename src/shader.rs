@@ -32,16 +32,28 @@ void main() {
     // Calculate world position with instance offset
     vec3 world_pos = vec3(pos.x + instance_offset.x, pos.y + 20.0, pos.z + instance_offset.y);
     
-    // Use one sine wave to modulate the amplitude of others
-    float amplitude_mod = (sin(world_pos.x * 0.002 + world_pos.z * 0.003) + 1.0) * 0.5; // 0 to 1
-    amplitude_mod = amplitude_mod * amplitude_mod; // Square it to make variation more dramatic
+    // Create base terrain with gentle slopes
+    float gentle = sin(world_pos.x * 0.0031) * cos(world_pos.z * 0.0027) * 25.0;
+    gentle += sin(world_pos.x * 0.0047) * sin(world_pos.z * 0.0053) * 20.0;
     
-    // Apply height with variable amplitude
-    float base_height = sin(world_pos.x * 0.01) * sin(world_pos.z * 0.012) * 80.0;
-    world_pos.y += base_height * amplitude_mod;
+    // Create a "roughness map" that determines where bumpy areas appear
+    float roughness = sin(world_pos.x * 0.0023 + 2.7) * cos(world_pos.z * 0.0019 - 1.3);
+    roughness += sin(world_pos.x * 0.0041 - world_pos.z * 0.0037) * 0.5;
+    roughness = (roughness + 1.5) / 3.0; // Normalize to ~0-1 range
     
-    // Add some smaller detail
-    world_pos.y += sin(world_pos.x * 0.05) * sin(world_pos.z * 0.05) * 5.0;
+    // Make roughness more sparse by thresholding
+    roughness = smoothstep(0.6, 0.8, roughness); // Only areas above 0.6 become rough
+    
+    // Bumpy terrain details
+    float bumps = 0.0;
+    bumps += sin(world_pos.x * 0.0173) * sin(world_pos.z * 0.0199) * 20.0;
+    bumps += cos(world_pos.x * 0.0293 + 2.1) * sin(world_pos.z * 0.0311 - 1.7) * 15.0;
+    bumps += sin(world_pos.x * 0.0519 + world_pos.z * 0.0413) * 8.0;
+    bumps += sin(world_pos.x * 0.0871 - world_pos.z * 0.0926) * 5.0;
+    bumps += sin(world_pos.x * 0.137) * cos(world_pos.z * 0.149) * 3.0;
+    
+    // Combine gentle slopes with sparse bumpy areas
+    world_pos.y += gentle + (bumps * roughness);
     
     // Pass height to fragment shader
     v_height = world_pos.y;

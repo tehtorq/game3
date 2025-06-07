@@ -20,8 +20,7 @@ use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
 
-const SCREEN_WIDTH: f32 = 1600.0;
-const SCREEN_HEIGHT: f32 = 1200.0;
+// Default screen dimensions are now dynamically calculated at 75% of monitor size
 
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
@@ -39,6 +38,8 @@ struct Stage {
     frame_count: u32,
     fps_timer: f64,
     last_frame_time: f64,
+    // Fullscreen state
+    fullscreen: bool,
 }
 
 #[derive(Default)]
@@ -182,6 +183,7 @@ impl Stage {
             frame_count: 0,
             fps_timer: 0.0,
             last_frame_time: miniquad::date::now(),
+            fullscreen: false,
         }
     }
 }
@@ -354,6 +356,19 @@ impl EventHandler for Stage {
             KeyCode::Space => self.input.shoot = true,
             KeyCode::Escape => window::request_quit(),
             KeyCode::P => self.paused = !self.paused,
+            KeyCode::F => {
+                self.fullscreen = !self.fullscreen;
+                if self.fullscreen {
+                    // Enter fullscreen - get screen size and use it
+                    let (screen_width, screen_height) = window::screen_size();
+                    window::set_window_size(screen_width as u32, screen_height as u32);
+                    window::set_fullscreen(true);
+                } else {
+                    // Exit fullscreen - restore window size
+                    window::set_fullscreen(false);
+                    window::set_window_size(1200, 900);
+                }
+            }
             _ => {}
         }
     }
@@ -371,11 +386,16 @@ impl EventHandler for Stage {
 }
 
 fn main() {
+    // Default window size - 75% will be calculated after window creation
+    // Using 1200x900 as a reasonable default (75% of 1600x1200)
+    let window_width = 1200;
+    let window_height = 900;
+    
     miniquad::start(
         conf::Conf {
             window_title: "Vector Shooter 3D".to_string(),
-            window_width: SCREEN_WIDTH as i32,
-            window_height: SCREEN_HEIGHT as i32,
+            window_width,
+            window_height,
             ..Default::default()
         },
         || Box::new(Stage::new()),
