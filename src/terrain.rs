@@ -36,34 +36,35 @@ impl TerrainChunk {
 
 impl Drawable for TerrainChunk {
     fn draw(&self, renderer: &mut Renderer) {
-        let terrain_y_base = -30.0; // Base terrain height
+        let terrain_y_base = -30.0;
+        let grid_size = 4; // 4x4 grid of quads per chunk
+        let cell_size = 20.0;
+        let half_size = 40.0;
         
-        // Draw a simple grid square for each chunk (same as before)
-        let size = 40.0;
-        let x1 = self.x_offset - size;
-        let x2 = self.x_offset + size;
-        let z1 = self.z_offset - size;
-        let z2 = self.z_offset + size;
-        
-        // Draw outline of chunk with height
-        let y1z1 = self.height_at(x1, z1) + terrain_y_base;
-        let y2z1 = self.height_at(x2, z1) + terrain_y_base;
-        let y2z2 = self.height_at(x2, z2) + terrain_y_base;
-        let y1z2 = self.height_at(x1, z2) + terrain_y_base;
-        
-        renderer.draw_line(Vec3::new(x1, y1z1, z1), Vec3::new(x2, y2z1, z1));
-        renderer.draw_line(Vec3::new(x2, y2z1, z1), Vec3::new(x2, y2z2, z2));
-        renderer.draw_line(Vec3::new(x2, y2z2, z2), Vec3::new(x1, y1z2, z2));
-        renderer.draw_line(Vec3::new(x1, y1z2, z2), Vec3::new(x1, y1z1, z1));
-        
-        // Draw cross in middle with height
-        let ymid = self.height_at(self.x_offset, self.z_offset) + terrain_y_base;
-        let y1mid = self.height_at(x1, self.z_offset) + terrain_y_base;
-        let y2mid = self.height_at(x2, self.z_offset) + terrain_y_base;
-        let ymid1 = self.height_at(self.x_offset, z1) + terrain_y_base;
-        let ymid2 = self.height_at(self.x_offset, z2) + terrain_y_base;
-        
-        renderer.draw_line(Vec3::new(x1, y1mid, self.z_offset), Vec3::new(x2, y2mid, self.z_offset));
-        renderer.draw_line(Vec3::new(self.x_offset, ymid1, z1), Vec3::new(self.x_offset, ymid2, z2));
+        // Generate grid of triangles
+        for i in 0..grid_size {
+            for j in 0..grid_size {
+                let x1 = self.x_offset - half_size + (i as f32) * cell_size;
+                let x2 = x1 + cell_size;
+                let z1 = self.z_offset - half_size + (j as f32) * cell_size;
+                let z2 = z1 + cell_size;
+                
+                // Get heights at corners
+                let y11 = self.height_at(x1, z1) + terrain_y_base;
+                let y21 = self.height_at(x2, z1) + terrain_y_base;
+                let y12 = self.height_at(x1, z2) + terrain_y_base;
+                let y22 = self.height_at(x2, z2) + terrain_y_base;
+                
+                // Create vertices
+                let v1 = Vec3::new(x1, y11, z1);
+                let v2 = Vec3::new(x2, y21, z1);
+                let v3 = Vec3::new(x1, y12, z2);
+                let v4 = Vec3::new(x2, y22, z2);
+                
+                // Draw two triangles to form a quad
+                renderer.draw_triangle(v1, v2, v3);
+                renderer.draw_triangle(v2, v4, v3);
+            }
+        }
     }
 }

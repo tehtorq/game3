@@ -101,7 +101,7 @@ impl Game {
         
         // Draw terrain with simple distance culling
         let player_pos = self.player.pos;
-        let max_draw_distance = 1500.0; // Only draw chunks within this distance
+        let max_draw_distance = 800.0; // Only draw chunks within this distance
         
         for chunk in &self.terrain_chunks {
             let chunk_center = Vec3::new(chunk.x_offset, 0.0, chunk.z_offset);
@@ -132,7 +132,7 @@ impl Game {
 
     fn update_terrain_chunks(&mut self) {
         let chunk_size = 80.0;
-        let view_distance = 24; // Number of chunks in each direction
+        let view_distance = 12; // Number of chunks in each direction
         
         // Calculate which chunk the player is in
         let player_chunk_x = (self.player.pos.x / chunk_size).floor() as i32;

@@ -8,11 +8,22 @@ pub trait Drawable {
 pub struct Renderer<'a> {
     pub vertices: &'a mut Vec<Vertex>,
     pub indices: &'a mut Vec<u16>,
+    pub mode: RenderMode,
+}
+
+#[derive(Clone, Copy)]
+pub enum RenderMode {
+    Lines,
+    Triangles,
 }
 
 impl<'a> Renderer<'a> {
     pub fn new(vertices: &'a mut Vec<Vertex>, indices: &'a mut Vec<u16>) -> Self {
-        Self { vertices, indices }
+        Self { vertices, indices, mode: RenderMode::Lines }
+    }
+
+    pub fn set_mode(&mut self, mode: RenderMode) {
+        self.mode = mode;
     }
 
     pub fn draw_line(&mut self, from: Vec3, to: Vec3) {
@@ -21,6 +32,20 @@ impl<'a> Renderer<'a> {
         self.vertices.push(Vertex::new(to.x, to.y, to.z));
         self.indices.push(base_idx);
         self.indices.push(base_idx + 1);
+    }
+
+    pub fn draw_triangle(&mut self, p1: Vec3, p2: Vec3, p3: Vec3) {
+        let base_idx = self.vertices.len() as u16;
+        
+        // Add vertices with barycentric coordinates
+        self.vertices.push(Vertex::with_barycentric(p1.x, p1.y, p1.z, 1.0, 0.0, 0.0));
+        self.vertices.push(Vertex::with_barycentric(p2.x, p2.y, p2.z, 0.0, 1.0, 0.0));
+        self.vertices.push(Vertex::with_barycentric(p3.x, p3.y, p3.z, 0.0, 0.0, 1.0));
+        
+        // Add triangle indices
+        self.indices.push(base_idx);
+        self.indices.push(base_idx + 1);
+        self.indices.push(base_idx + 2);
     }
 
     pub fn draw_cube(&mut self, center: Vec3, size: f32, rotation: Mat4) {

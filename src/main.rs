@@ -13,7 +13,7 @@ mod shader;
 mod game;
 
 use vertex::Vertex;
-use renderer::Renderer;
+use renderer::{Renderer, RenderMode};
 use camera::Camera;
 use game::Game;
 
@@ -22,7 +22,8 @@ const SCREEN_HEIGHT: f32 = 1200.0;
 
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
-    pipeline: Pipeline,
+    line_pipeline: Pipeline,
+    triangle_pipeline: Pipeline,
     bindings: Bindings,
     game: Game,
     camera: Camera,
@@ -50,20 +51,41 @@ impl Stage {
             shader::meta()
         ).unwrap();
         
-        let pipeline = ctx.new_pipeline(
+        let line_pipeline = ctx.new_pipeline(
             &[BufferLayout {
                 step_func: VertexStep::PerVertex,
-                stride: 12, // 3 floats * 4 bytes
+                stride: 24, // 6 floats * 4 bytes
                 ..Default::default()
             }],
             &[
                 VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
             ],
-            shader,
+            shader.clone(),
             PipelineParams {
                 primitive_type: PrimitiveType::Lines,
                 depth_test: Comparison::Always,
                 depth_write: false,
+                ..Default::default()
+            },
+        );
+        
+        let triangle_pipeline = ctx.new_pipeline(
+            &[BufferLayout {
+                step_func: VertexStep::PerVertex,
+                stride: 24, // 6 floats * 4 bytes
+                ..Default::default()
+            }],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+            ],
+            shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::Always,
+                depth_write: false,
+                cull_face: CullFace::Nothing,
                 ..Default::default()
             },
         );
@@ -87,7 +109,8 @@ impl Stage {
 
         Self {
             ctx,
-            pipeline,
+            line_pipeline,
+            triangle_pipeline,
             bindings,
             game: Game::new(),
             camera: Camera::new(),
@@ -115,6 +138,7 @@ impl EventHandler for Stage {
         
         // Draw the game
         let mut renderer = Renderer::new(&mut vertices, &mut indices);
+        renderer.set_mode(RenderMode::Triangles);
         self.game.draw(&mut renderer);
         
         // Set up view and projection matrices
@@ -133,7 +157,7 @@ impl EventHandler for Stage {
             self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
 
-            self.ctx.apply_pipeline(&self.pipeline);
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp)));
             self.ctx.draw(0, indices.len() as i32, 1);
