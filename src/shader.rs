@@ -22,7 +22,6 @@ attribute vec2 instance_offset;
 varying vec3 v_barycentric;
 
 uniform mat4 mvp;
-uniform sampler2D height_texture;
 uniform float terrain_scale;
 uniform float terrain_y_base;
 
@@ -77,7 +76,7 @@ pub fn meta() -> ShaderMeta {
 
 pub fn meta_terrain() -> ShaderMeta {
     ShaderMeta {
-        images: vec!["height_texture".to_string()],
+        images: vec![],
         uniforms: UniformBlockLayout {
             uniforms: vec![
                 UniformDesc::new("mvp", UniformType::Mat4),

@@ -35,6 +35,10 @@ struct Stage {
     input: InputState,
     paused: bool,
     instanced_terrain: Option<InstancedTerrain>,
+    // FPS tracking fields
+    frame_count: u32,
+    fps_timer: f64,
+    last_frame_time: f64,
 }
 
 #[derive(Default)]
@@ -175,6 +179,9 @@ impl Stage {
             input: InputState::default(),
             paused: false,
             instanced_terrain: None,
+            frame_count: 0,
+            fps_timer: 0.0,
+            last_frame_time: miniquad::date::now(),
         }
     }
 }
@@ -195,18 +202,34 @@ impl EventHandler for Stage {
     }
 
     fn draw(&mut self) {
+        // FPS calculation
+        let current_time = miniquad::date::now();
+        let delta_time = current_time - self.last_frame_time;
+        self.last_frame_time = current_time;
+        
+        self.frame_count += 1;
+        self.fps_timer += delta_time;
+        
+        // Print FPS once per second
+        if self.fps_timer >= 1.0 {
+            let fps = self.frame_count as f64 / self.fps_timer;
+            println!("FPS: {:.1}", fps);
+            self.frame_count = 0;
+            self.fps_timer = 0.0;
+        }
+        
         // Initialize instanced terrain on first draw
         if self.instanced_terrain.is_none() {
             println!("Initializing instanced terrain...");
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 5); // Smaller for debugging
+                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 160); // 32x original view distance
                 
                 // Create terrain bindings
                 self.terrain_bindings = Bindings {
                     vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
                     index_buffer: terrain.index_buffer(),
-                    images: vec![terrain.height_texture()],
+                    images: vec![],
                 };
                 
                 println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
