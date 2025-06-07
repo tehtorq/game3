@@ -66,8 +66,8 @@ impl Stage {
             shader.clone(),
             PipelineParams {
                 primitive_type: PrimitiveType::Lines,
-                depth_test: Comparison::Always,
-                depth_write: false,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
                 ..Default::default()
             },
         );
@@ -188,7 +188,11 @@ impl EventHandler for Stage {
         }
         
         // Render
-        self.ctx.begin_default_pass(PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
+        self.ctx.begin_default_pass(PassAction::Clear {
+            color: Some((0.0, 0.0, 0.0, 1.0)),
+            depth: Some(1.0),
+            stencil: None,
+        });
         
         // Draw triangles
         if !triangle_vertices.is_empty() {
