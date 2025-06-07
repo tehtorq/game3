@@ -32,6 +32,6 @@ impl Camera {
 
     pub fn get_projection_matrix(&self, aspect: f32) -> Mat4 {
         // Use left-handed projection (this worked)
-        Mat4::perspective_lh(60.0f32.to_radians(), aspect, 1.0, 5000.0)
+        Mat4::perspective_lh(60.0f32.to_radians(), aspect, 1.0, 10000.0)  // Increased far plane
     }
 }

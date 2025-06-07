@@ -30,6 +30,8 @@ struct Stage {
     camera: Camera,
     input: InputState,
     paused: bool,
+    terrain_initialized: bool,
+    terrain_chunk_bindings: std::collections::HashMap<(i32, i32), Bindings>,
 }
 
 #[derive(Default)]
@@ -118,6 +120,8 @@ impl Stage {
             camera: Camera::new(),
             input: InputState::default(),
             paused: false,
+            terrain_initialized: false,
+            terrain_chunk_bindings: std::collections::HashMap::new(),
         }
     }
 }
@@ -134,10 +138,25 @@ impl EventHandler for Stage {
                 self.input.shoot,
                 dt
             );
+            
+            // Update terrain chunks with rendering context
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            unsafe {
+                self.game.update_terrain_chunks(&mut *ctx_ptr);
+            }
         }
     }
 
     fn draw(&mut self) {
+        // Initialize terrain chunks on first draw
+        if !self.terrain_initialized {
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            unsafe {
+                self.game.update_terrain_chunks(&mut *ctx_ptr);
+            }
+            self.terrain_initialized = true;
+        }
+        
         // Set up view and projection matrices
         let (width, height) = window::screen_size();
         let aspect = width / height;
@@ -152,76 +171,78 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
-        // Draw terrain in green
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
+        // Draw terrain chunks using their GPU buffers
+        self.ctx.apply_pipeline(&self.triangle_pipeline);
         
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Triangles);
+        let player_pos = self.game.player.pos;
+        let max_draw_distance = 3200.0;
+        
+        // Calculate camera position (behind and above player)
+        let camera_offset = Vec3::new(
+            self.game.player.rotation.sin() * 150.0,
+            80.0,
+            self.game.player.rotation.cos() * 150.0
+        );
+        let camera_pos = player_pos + camera_offset;
+        
+        // Get camera forward direction (looking at player)
+        let camera_forward = (player_pos - camera_pos).normalize();
+        
+        // FOV parameters (60 degrees FOV + some margin)
+        let fov_cos = (60.0f32 + 20.0).to_radians().cos();
+        
+        // Set uniforms once for all terrain
+        self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 0.0]))); // Green
+        
+        for chunk in &self.game.terrain_chunks {
+            let chunk_center = Vec3::new(chunk.x_offset, -30.0, chunk.z_offset);
             
-            let player_pos = self.game.player.pos;
-            let max_draw_distance = 2400.0;
+            // Calculate chunk bounds (chunks are 160x160)
+            let chunk_radius = 113.14;
             
-            // Calculate camera position (behind and above player)
-            let camera_offset = Vec3::new(
-                self.game.player.rotation.sin() * 150.0,
-                80.0,
-                self.game.player.rotation.cos() * 150.0
-            );
-            let camera_pos = player_pos + camera_offset;
+            // Vector from camera to chunk
+            let to_chunk = chunk_center - camera_pos;
+            let distance = to_chunk.length();
             
-            // Get camera forward direction (looking at player)
-            let camera_forward = (player_pos - camera_pos).normalize();
+            // Skip if too far
+            if distance > max_draw_distance + chunk_radius {
+                continue;
+            }
             
-            // FOV parameters (60 degrees FOV + some margin)
-            let fov_cos = (60.0f32 + 20.0).to_radians().cos(); // Add margin for safety
-            
-            for chunk in &self.game.terrain_chunks {
-                let chunk_center = Vec3::new(chunk.x_offset, -30.0, chunk.z_offset); // Use actual terrain height
+            // Improved frustum culling
+            if distance > chunk_radius * 2.0 {
+                let to_chunk_normalized = to_chunk.normalize();
+                let dot = camera_forward.dot(to_chunk_normalized);
                 
-                // Calculate chunk bounds (chunks are 80x80)
-                let chunk_radius = 56.57; // Diagonal of 80x80 square (sqrt(80²+80²)/2)
+                // Account for chunk size in frustum test
+                let angle_adjustment = (chunk_radius / distance).atan();
+                let adjusted_fov_cos = (fov_cos.acos() + angle_adjustment).cos();
                 
-                // Vector from camera to chunk
-                let to_chunk = chunk_center - camera_pos;
-                let distance = to_chunk.length();
-                
-                // Skip if too far
-                if distance > max_draw_distance + chunk_radius {
+                if dot < adjusted_fov_cos {
                     continue;
                 }
-                
-                // Improved frustum culling
-                if distance > chunk_radius * 2.0 { // Don't cull very close chunks
-                    let to_chunk_normalized = to_chunk.normalize();
-                    let dot = camera_forward.dot(to_chunk_normalized);
-                    
-                    // Account for chunk size in frustum test
-                    let angle_adjustment = (chunk_radius / distance).atan();
-                    let adjusted_fov_cos = (fov_cos.acos() + angle_adjustment).cos();
-                    
-                    if dot < adjusted_fov_cos {
-                        continue;
-                    }
-                }
-                
-                chunk.draw(&mut renderer);
             }
-        }
-        
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.triangle_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 0.0]))); // Green
-            self.ctx.draw(0, indices.len() as i32, 1);
+            
+            // Get chunk coordinates for caching
+            let chunk_x = (chunk.x_offset / 160.0).round() as i32;
+            let chunk_z = (chunk.z_offset / 160.0).round() as i32;
+            let chunk_key = (chunk_x, chunk_z);
+            
+            // Get or create bindings for this chunk
+            let chunk_bindings = self.terrain_chunk_bindings.entry(chunk_key)
+                .or_insert_with(|| Bindings {
+                    vertex_buffers: vec![chunk.vertex_buffer()],
+                    index_buffer: chunk.index_buffer(),
+                    images: vec![],
+                });
+            
+            self.ctx.apply_bindings(chunk_bindings);
+            self.ctx.draw(0, chunk.index_count(), 1);
         }
         
         // Draw enemies in red
-        vertices.clear();
-        indices.clear();
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
         
         {
             let mut renderer = Renderer::new(&mut vertices, &mut indices);
@@ -235,6 +256,8 @@ impl EventHandler for Stage {
         if !vertices.is_empty() {
             self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.0, 0.0]))); // Red
             self.ctx.draw(0, indices.len() as i32, 1);
         }
@@ -252,6 +275,8 @@ impl EventHandler for Stage {
         if !vertices.is_empty() {
             self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 1.0]))); // Cyan
             self.ctx.draw(0, indices.len() as i32, 1);
         }

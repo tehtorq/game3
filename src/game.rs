@@ -1,5 +1,6 @@
 use rand::prelude::*;
 use std::f32::consts::PI;
+use miniquad::RenderingBackend;
 
 use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
@@ -34,8 +35,7 @@ impl Game {
             score: 0,
         };
         
-        // Create initial terrain chunks
-        game.update_terrain_chunks();
+        // Don't create terrain chunks here - they need the rendering context
         game.spawn_wave();
         
         game
@@ -45,8 +45,7 @@ impl Game {
         // Update player
         self.player.update(left, right, up, down, dt);
         
-        // Update terrain chunks
-        self.update_terrain_chunks();
+        // Terrain chunks are now managed in main.rs
         
         // Handle shooting
         if shoot && self.shoot_cooldown <= 0.0 {
@@ -92,13 +91,13 @@ impl Game {
         }
     }
 
-    pub fn draw(&self, renderer: &mut Renderer) {
+    pub fn draw(&self, _renderer: &mut Renderer) {
         // This method can remain empty as we're handling drawing in main.rs now
     }
 
-    fn update_terrain_chunks(&mut self) {
-        let chunk_size = 80.0;
-        let view_distance = 24; // Number of chunks in each direction (increased from 12)
+    pub fn update_terrain_chunks(&mut self, ctx: &mut dyn RenderingBackend) {
+        let chunk_size = 160.0;
+        let view_distance = 48; // Number of chunks in each direction (increased for maximum view)
         
         // Calculate which chunk the player is in
         let player_chunk_x = (self.player.pos.x / chunk_size).floor() as i32;
@@ -132,7 +131,7 @@ impl Game {
             });
             
             if !exists {
-                self.terrain_chunks.push(TerrainChunk::new(x_offset, z_offset));
+                self.terrain_chunks.push(TerrainChunk::new(x_offset, z_offset, ctx));
             }
         }
     }
