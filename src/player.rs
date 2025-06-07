@@ -54,9 +54,10 @@ impl Player {
         }
     }
 
-    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, boost: bool, dt: f32) {
         const TURN_SPEED: f32 = 2.0;
         const FORWARD_SPEED: f32 = 500.0;
+        const BOOST_MULTIPLIER: f32 = 2.5;
         const VERTICAL_SPEED: f32 = 150.0;
         
         // Handle rotation
@@ -88,10 +89,11 @@ impl Player {
         self.pitch = self.pitch * 0.9 + target_pitch * 0.1;
         
         // Calculate forward direction based on rotation
+        let speed = if boost { FORWARD_SPEED * BOOST_MULTIPLIER } else { FORWARD_SPEED };
         let forward = Vec3::new(
-            -self.rotation.sin() * FORWARD_SPEED,
+            -self.rotation.sin() * speed,
             0.0,
-            -self.rotation.cos() * FORWARD_SPEED
+            -self.rotation.cos() * speed
         );
         
         // Set velocity based on rotation and inputs

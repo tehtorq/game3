@@ -49,6 +49,7 @@ struct InputState {
     up: bool,
     down: bool,
     shoot: bool,
+    boost: bool,
 }
 
 impl Stage {
@@ -205,6 +206,7 @@ impl EventHandler for Stage {
                 self.input.up,
                 self.input.down,
                 self.input.shoot,
+                self.input.boost,
                 dt
             );
         }
@@ -361,6 +363,7 @@ impl EventHandler for Stage {
             KeyCode::Up | KeyCode::W => self.input.up = true,
             KeyCode::Down | KeyCode::S => self.input.down = true,
             KeyCode::Space => self.input.shoot = true,
+            KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = true,
             KeyCode::Escape => window::request_quit(),
             KeyCode::P => self.paused = !self.paused,
             KeyCode::F => {
@@ -387,6 +390,7 @@ impl EventHandler for Stage {
             KeyCode::Up | KeyCode::W => self.input.up = false,
             KeyCode::Down | KeyCode::S => self.input.down = false,
             KeyCode::Space => self.input.shoot = false,
+            KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = false,
             _ => {}
         }
     }

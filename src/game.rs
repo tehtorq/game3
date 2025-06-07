@@ -36,9 +36,9 @@ impl Game {
         game
     }
 
-    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, boost: bool, dt: f32) {
         // Update player
-        self.player.update(left, right, up, down, dt);
+        self.player.update(left, right, up, down, boost, dt);
         
         // Handle shooting
         if shoot && self.shoot_cooldown <= 0.0 {
