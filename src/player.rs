@@ -77,11 +77,11 @@ impl Player {
         };
         self.banking = self.banking * 0.9 + target_banking * 0.1;
         
-        // Update pitch for vertical movement
+        // Update pitch for vertical movement (swapped to match controls)
         let target_pitch = if up {
-            0.3
-        } else if down {
             -0.3
+        } else if down {
+            0.3
         } else {
             0.0
         };
@@ -97,12 +97,12 @@ impl Player {
         // Set velocity based on rotation and inputs
         self.vel = forward;
         
-        // Add vertical movement
+        // Add vertical movement (swapped)
         if up {
-            self.vel.y = VERTICAL_SPEED;
+            self.vel.y = -VERTICAL_SPEED;
         }
         if down {
-            self.vel.y = -VERTICAL_SPEED;
+            self.vel.y = VERTICAL_SPEED;
         }
         
         self.pos += self.vel * dt;
