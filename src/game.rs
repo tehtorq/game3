@@ -1,13 +1,12 @@
 use rand::prelude::*;
 use std::f32::consts::PI;
-use glam::Vec3;
 
 use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
 use crate::bullet::Bullet;
 use crate::particle::Particle;
 use crate::terrain::TerrainChunk;
-use crate::renderer::{Renderer, Drawable};
+use crate::renderer::Renderer;
 
 pub struct Game {
     pub player: Player,
@@ -94,40 +93,7 @@ impl Game {
     }
 
     pub fn draw(&self, renderer: &mut Renderer) {
-        // DEBUG: Draw a cross at world origin
-        renderer.draw_line(Vec3::new(-100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
-        renderer.draw_line(Vec3::new(0.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0));
-        renderer.draw_line(Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
-        
-        // Draw terrain with simple distance culling
-        let player_pos = self.player.pos;
-        let max_draw_distance = 800.0; // Only draw chunks within this distance
-        
-        for chunk in &self.terrain_chunks {
-            let chunk_center = Vec3::new(chunk.x_offset, 0.0, chunk.z_offset);
-            let distance = (chunk_center - player_pos).length();
-            if distance < max_draw_distance {
-                chunk.draw(renderer);
-            }
-        }
-        
-        // Draw player
-        self.player.draw(renderer);
-        
-        // Draw enemies
-        for enemy in &self.enemies {
-            enemy.draw(renderer);
-        }
-        
-        // Draw bullets
-        for bullet in &self.bullets {
-            bullet.draw(renderer);
-        }
-        
-        // Draw particles
-        for particle in &self.particles {
-            particle.draw(renderer);
-        }
+        // This method can remain empty as we're handling drawing in main.rs now
     }
 
     fn update_terrain_chunks(&mut self) {

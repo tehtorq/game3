@@ -28,6 +28,7 @@ impl<'a> Renderer<'a> {
 
     pub fn draw_line(&mut self, from: Vec3, to: Vec3) {
         let base_idx = self.vertices.len() as u16;
+        // Use zero barycentric coordinates for lines
         self.vertices.push(Vertex::new(from.x, from.y, from.z));
         self.vertices.push(Vertex::new(to.x, to.y, to.z));
         self.indices.push(base_idx);

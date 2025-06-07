@@ -20,14 +20,19 @@ precision mediump float;
 varying vec3 v_barycentric;
 
 void main() {
-    // Calculate distance to nearest edge
-    float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
-    
-    // Draw only near edges for wireframe effect
-    if (minBary < 0.02) {
+    // If barycentric coordinates are all zero, this is a line vertex
+    if (v_barycentric.x == 0.0 && v_barycentric.y == 0.0 && v_barycentric.z == 0.0) {
         gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
     } else {
-        discard;
+        // Calculate distance to nearest edge for triangles
+        float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
+        
+        // Draw only near edges for wireframe effect
+        if (minBary < 0.02) {
+            gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+        } else {
+            discard;
+        }
     }
 }"#;
 

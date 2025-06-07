@@ -1,4 +1,5 @@
 use miniquad::*;
+use glam::Vec3;
 
 mod math;
 mod vertex;
@@ -13,7 +14,7 @@ mod shader;
 mod game;
 
 use vertex::Vertex;
-use renderer::{Renderer, RenderMode};
+use renderer::{Renderer, RenderMode, Drawable};
 use camera::Camera;
 use game::Game;
 
@@ -133,34 +134,76 @@ impl EventHandler for Stage {
     }
 
     fn draw(&mut self) {
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        
-        // Draw the game
-        let mut renderer = Renderer::new(&mut vertices, &mut indices);
-        renderer.set_mode(RenderMode::Triangles);
-        self.game.draw(&mut renderer);
+        let mut line_vertices = Vec::new();
+        let mut line_indices = Vec::new();
+        let mut triangle_vertices = Vec::new();
+        let mut triangle_indices = Vec::new();
         
         // Set up view and projection matrices
         let (width, height) = window::screen_size();
         let aspect = width / height;
-        
-        // Use proper projection and view matrices
         let proj = self.camera.get_projection_matrix(aspect);
         let view = self.camera.get_view_matrix(&self.game.player);
         let mvp = proj * view;
         
+        // Collect terrain triangles
+        let mut triangle_renderer = Renderer::new(&mut triangle_vertices, &mut triangle_indices);
+        triangle_renderer.set_mode(RenderMode::Triangles);
+        
+        // Draw only terrain chunks with triangles
+        let player_pos = self.game.player.pos;
+        let max_draw_distance = 800.0;
+        
+        for chunk in &self.game.terrain_chunks {
+            let chunk_center = Vec3::new(chunk.x_offset, 0.0, chunk.z_offset);
+            let distance = (chunk_center - player_pos).length();
+            if distance < max_draw_distance {
+                chunk.draw(&mut triangle_renderer);
+            }
+        }
+        
+        // Collect everything else as lines
+        let mut line_renderer = Renderer::new(&mut line_vertices, &mut line_indices);
+        line_renderer.set_mode(RenderMode::Lines);
+        
+        // Draw debug cross
+        line_renderer.draw_line(Vec3::new(-100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
+        line_renderer.draw_line(Vec3::new(0.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0));
+        line_renderer.draw_line(Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
+        
+        // Draw game entities
+        self.game.player.draw(&mut line_renderer);
+        for enemy in &self.game.enemies {
+            enemy.draw(&mut line_renderer);
+        }
+        for bullet in &self.game.bullets {
+            bullet.draw(&mut line_renderer);
+        }
+        for particle in &self.game.particles {
+            particle.draw(&mut line_renderer);
+        }
+        
         // Render
         self.ctx.begin_default_pass(PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
         
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-
+        // Draw triangles
+        if !triangle_vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&triangle_vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&triangle_indices));
             self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp)));
-            self.ctx.draw(0, indices.len() as i32, 1);
+            self.ctx.draw(0, triangle_indices.len() as i32, 1);
+        }
+        
+        // Draw lines
+        if !line_vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&line_vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&line_indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp)));
+            self.ctx.draw(0, line_indices.len() as i32, 1);
         }
         
         self.ctx.end_render_pass();
