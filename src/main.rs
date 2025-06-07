@@ -17,8 +17,8 @@ use renderer::Renderer;
 use camera::Camera;
 use game::Game;
 
-const SCREEN_WIDTH: f32 = 800.0;
-const SCREEN_HEIGHT: f32 = 600.0;
+const SCREEN_WIDTH: f32 = 1600.0;
+const SCREEN_HEIGHT: f32 = 1200.0;
 
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
