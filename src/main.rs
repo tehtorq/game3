@@ -71,12 +71,12 @@ impl Stage {
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<Vertex>(500000)
+            BufferSource::empty::<Vertex>(2000000)
         );
         let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<u16>(1000000)
+            BufferSource::empty::<u16>(4000000)
         );
         
         let bindings = Bindings {

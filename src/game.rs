@@ -99,9 +99,16 @@ impl Game {
         renderer.draw_line(Vec3::new(0.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0));
         renderer.draw_line(Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
         
-        // Draw terrain
+        // Draw terrain with simple distance culling
+        let player_pos = self.player.pos;
+        let max_draw_distance = 1500.0; // Only draw chunks within this distance
+        
         for chunk in &self.terrain_chunks {
-            chunk.draw(renderer);
+            let chunk_center = Vec3::new(chunk.x_offset, 0.0, chunk.z_offset);
+            let distance = (chunk_center - player_pos).length();
+            if distance < max_draw_distance {
+                chunk.draw(renderer);
+            }
         }
         
         // Draw player
