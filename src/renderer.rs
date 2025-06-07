@@ -7,7 +7,7 @@ pub trait Drawable {
 
 pub struct Renderer<'a> {
     pub vertices: &'a mut Vec<Vertex>,
-    pub indices: &'a mut Vec<u16>,
+    pub indices: &'a mut Vec<u32>,
     pub mode: RenderMode,
 }
 
@@ -18,7 +18,7 @@ pub enum RenderMode {
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(vertices: &'a mut Vec<Vertex>, indices: &'a mut Vec<u16>) -> Self {
+    pub fn new(vertices: &'a mut Vec<Vertex>, indices: &'a mut Vec<u32>) -> Self {
         Self { vertices, indices, mode: RenderMode::Lines }
     }
 
@@ -27,7 +27,7 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn draw_line(&mut self, from: Vec3, to: Vec3) {
-        let base_idx = self.vertices.len() as u16;
+        let base_idx = self.vertices.len() as u32;
         // Use zero barycentric coordinates for lines
         self.vertices.push(Vertex::new(from.x, from.y, from.z));
         self.vertices.push(Vertex::new(to.x, to.y, to.z));
@@ -36,7 +36,7 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn draw_triangle(&mut self, p1: Vec3, p2: Vec3, p3: Vec3) {
-        let base_idx = self.vertices.len() as u16;
+        let base_idx = self.vertices.len() as u32;
         
         // Add vertices with barycentric coordinates
         self.vertices.push(Vertex::with_barycentric(p1.x, p1.y, p1.z, 1.0, 0.0, 0.0));

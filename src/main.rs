@@ -100,7 +100,7 @@ impl Stage {
         let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<u16>(4000000)
+            BufferSource::empty::<u32>(4000000)
         );
         
         let bindings = Bindings {
@@ -161,14 +161,52 @@ impl EventHandler for Stage {
             renderer.set_mode(RenderMode::Triangles);
             
             let player_pos = self.game.player.pos;
-            let max_draw_distance = 800.0;
+            let max_draw_distance = 2400.0;
+            
+            // Calculate camera position (behind and above player)
+            let camera_offset = Vec3::new(
+                self.game.player.rotation.sin() * 150.0,
+                80.0,
+                self.game.player.rotation.cos() * 150.0
+            );
+            let camera_pos = player_pos + camera_offset;
+            
+            // Get camera forward direction (looking at player)
+            let camera_forward = (player_pos - camera_pos).normalize();
+            
+            // FOV parameters (60 degrees FOV + some margin)
+            let fov_cos = (60.0f32 + 20.0).to_radians().cos(); // Add margin for safety
             
             for chunk in &self.game.terrain_chunks {
-                let chunk_center = Vec3::new(chunk.x_offset, 0.0, chunk.z_offset);
-                let distance = (chunk_center - player_pos).length();
-                if distance < max_draw_distance {
-                    chunk.draw(&mut renderer);
+                let chunk_center = Vec3::new(chunk.x_offset, -30.0, chunk.z_offset); // Use actual terrain height
+                
+                // Calculate chunk bounds (chunks are 80x80)
+                let chunk_radius = 56.57; // Diagonal of 80x80 square (sqrt(80²+80²)/2)
+                
+                // Vector from camera to chunk
+                let to_chunk = chunk_center - camera_pos;
+                let distance = to_chunk.length();
+                
+                // Skip if too far
+                if distance > max_draw_distance + chunk_radius {
+                    continue;
                 }
+                
+                // Improved frustum culling
+                if distance > chunk_radius * 2.0 { // Don't cull very close chunks
+                    let to_chunk_normalized = to_chunk.normalize();
+                    let dot = camera_forward.dot(to_chunk_normalized);
+                    
+                    // Account for chunk size in frustum test
+                    let angle_adjustment = (chunk_radius / distance).atan();
+                    let adjusted_fov_cos = (fov_cos.acos() + angle_adjustment).cos();
+                    
+                    if dot < adjusted_fov_cos {
+                        continue;
+                    }
+                }
+                
+                chunk.draw(&mut renderer);
             }
         }
         
