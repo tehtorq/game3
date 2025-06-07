@@ -96,7 +96,7 @@ impl Game {
         for i in 0..enemy_count {
             // Spawn enemies in front of the player in a spread pattern
             let angle_offset = (i as f32 / enemy_count as f32 - 0.5) * PI * 0.8;
-            let distance = rng.gen_range(300.0..800.0);
+            let distance = rng.gen_range(1500.0..3000.0);
             let spawn_angle = self.player.rotation + angle_offset;
             
             let x = self.player.pos.x - spawn_angle.sin() * distance;

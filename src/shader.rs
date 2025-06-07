@@ -32,6 +32,10 @@ void main() {
     // Calculate world position with instance offset
     vec3 world_pos = vec3(pos.x + instance_offset.x, pos.y + 20.0, pos.z + instance_offset.y);
     
+    // Large-scale terrain features - very broad valleys and mountains (4x amplified)
+    float large_scale = sin(world_pos.x * 0.0005) * sin(world_pos.z * 0.0007) * 240.0;
+    large_scale += cos(world_pos.x * 0.0003 + 1.5) * sin(world_pos.z * 0.0004 - 0.8) * 200.0;
+    
     // Create base terrain with gentle slopes
     float gentle = sin(world_pos.x * 0.0031) * cos(world_pos.z * 0.0027) * 25.0;
     gentle += sin(world_pos.x * 0.0047) * sin(world_pos.z * 0.0053) * 20.0;
@@ -52,8 +56,8 @@ void main() {
     bumps += sin(world_pos.x * 0.0871 - world_pos.z * 0.0926) * 5.0;
     bumps += sin(world_pos.x * 0.137) * cos(world_pos.z * 0.149) * 3.0;
     
-    // Combine gentle slopes with sparse bumpy areas
-    world_pos.y += gentle + (bumps * roughness);
+    // Combine all terrain features: large scale + gentle slopes + sparse bumpy areas
+    world_pos.y += large_scale + gentle + (bumps * roughness);
     
     // Pass height to fragment shader
     v_height = world_pos.y;

@@ -168,7 +168,7 @@ impl Stage {
             images: vec![],
         };
 
-        Self {
+        let mut stage = Self {
             ctx,
             line_pipeline,
             triangle_pipeline,
@@ -183,8 +183,15 @@ impl Stage {
             frame_count: 0,
             fps_timer: 0.0,
             last_frame_time: miniquad::date::now(),
-            fullscreen: false,
-        }
+            fullscreen: true,
+        };
+        
+        // Start in fullscreen
+        let (screen_width, screen_height) = window::screen_size();
+        window::set_window_size(screen_width as u32, screen_height as u32);
+        window::set_fullscreen(true);
+        
+        stage
     }
 }
 
