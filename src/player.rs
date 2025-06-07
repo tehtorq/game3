@@ -84,7 +84,7 @@ impl Drawable for Player {
     fn draw(&self, renderer: &mut Renderer) {
         let rotation = rotation_matrix(self.rotation, self.pitch, self.banking);
         
-        // Draw a proper spaceship
+        // Draw a proper spaceship using triangles
         let scale = 20.0;
         
         // Ship body vertices
@@ -94,36 +94,38 @@ impl Drawable for Player {
         let tail_top = self.pos + rotation.transform_vector3(Vec3::new(0.0, scale * 0.5, scale));
         let tail_bottom = self.pos + rotation.transform_vector3(Vec3::new(0.0, -scale * 0.3, scale));
         let center_top = self.pos + rotation.transform_vector3(Vec3::new(0.0, scale * 0.3, 0.0));
+        let center_bottom = self.pos + rotation.transform_vector3(Vec3::new(0.0, -scale * 0.2, 0.0));
         
-        // Main body
-        renderer.draw_line(nose, left_wing);
-        renderer.draw_line(nose, right_wing);
-        renderer.draw_line(left_wing, right_wing);
+        // Main body triangles
+        // Top surfaces
+        renderer.draw_triangle(nose, center_top, left_wing);
+        renderer.draw_triangle(nose, right_wing, center_top);
+        renderer.draw_triangle(center_top, right_wing, tail_top);
+        renderer.draw_triangle(center_top, tail_top, left_wing);
         
-        // Tail section
-        renderer.draw_line(left_wing, tail_top);
-        renderer.draw_line(right_wing, tail_top);
-        renderer.draw_line(left_wing, tail_bottom);
-        renderer.draw_line(right_wing, tail_bottom);
-        renderer.draw_line(tail_top, tail_bottom);
+        // Bottom surfaces
+        renderer.draw_triangle(nose, left_wing, center_bottom);
+        renderer.draw_triangle(nose, center_bottom, right_wing);
+        renderer.draw_triangle(center_bottom, tail_bottom, right_wing);
+        renderer.draw_triangle(center_bottom, left_wing, tail_bottom);
         
-        // Cockpit
-        renderer.draw_line(nose, center_top);
-        renderer.draw_line(center_top, tail_top);
+        // Side panels
+        renderer.draw_triangle(left_wing, tail_top, tail_bottom);
+        renderer.draw_triangle(right_wing, tail_bottom, tail_top);
         
-        // Wings detail
+        // Wing surfaces
         let left_wing_tip = self.pos + rotation.transform_vector3(Vec3::new(-scale * 1.5, 0.0, 0.0));
         let right_wing_tip = self.pos + rotation.transform_vector3(Vec3::new(scale * 1.5, 0.0, 0.0));
-        renderer.draw_line(left_wing, left_wing_tip);
-        renderer.draw_line(right_wing, right_wing_tip);
         
-        // Engine exhausts
-        let left_engine = self.pos + rotation.transform_vector3(Vec3::new(-scale * 0.5, 0.0, scale));
-        let right_engine = self.pos + rotation.transform_vector3(Vec3::new(scale * 0.5, 0.0, scale));
-        let left_exhaust = self.pos + rotation.transform_vector3(Vec3::new(-scale * 0.5, 0.0, scale * 1.3));
-        let right_exhaust = self.pos + rotation.transform_vector3(Vec3::new(scale * 0.5, 0.0, scale * 1.3));
+        // Left wing
+        renderer.draw_triangle(left_wing, left_wing_tip, center_top);
+        renderer.draw_triangle(left_wing, center_bottom, left_wing_tip);
         
-        renderer.draw_line(left_engine, left_exhaust);
-        renderer.draw_line(right_engine, right_exhaust);
+        // Right wing
+        renderer.draw_triangle(right_wing, center_top, right_wing_tip);
+        renderer.draw_triangle(right_wing, right_wing_tip, center_bottom);
+        
+        // Rear panel
+        renderer.draw_triangle(tail_top, tail_bottom, self.pos + rotation.transform_vector3(Vec3::new(0.0, 0.0, scale)));
     }
 }

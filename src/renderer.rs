@@ -66,15 +66,28 @@ impl<'a> Renderer<'a> {
             .map(|&c| center + rotation.transform_vector3(c))
             .collect();
 
-        // Draw cube edges
-        let edges = [
-            (0, 1), (1, 2), (2, 3), (3, 0), // front face
-            (4, 5), (5, 6), (6, 7), (7, 4), // back face
-            (0, 4), (1, 5), (2, 6), (3, 7), // connecting edges
+        // Draw cube as triangles for solid rendering
+        let faces = [
+            // Front face
+            [4, 5, 6], [4, 6, 7],
+            // Back face
+            [1, 0, 3], [1, 3, 2],
+            // Top face
+            [7, 6, 2], [7, 2, 3],
+            // Bottom face
+            [0, 1, 5], [0, 5, 4],
+            // Right face
+            [5, 1, 2], [5, 2, 6],
+            // Left face
+            [0, 4, 7], [0, 7, 3],
         ];
 
-        for &(i, j) in &edges {
-            self.draw_line(transformed[i], transformed[j]);
+        for face in &faces {
+            self.draw_triangle(
+                transformed[face[0]], 
+                transformed[face[1]], 
+                transformed[face[2]]
+            );
         }
     }
 
@@ -92,14 +105,15 @@ impl<'a> Renderer<'a> {
             .map(|&p| center + rotation.transform_vector3(p))
             .collect();
 
-        // Draw base
-        for i in 0..4 {
-            self.draw_line(transformed[i], transformed[(i + 1) % 4]);
-        }
-
-        // Draw edges to apex
-        for i in 0..4 {
-            self.draw_line(transformed[i], transformed[4]);
-        }
+        // Draw pyramid as triangles
+        // Base
+        self.draw_triangle(transformed[0], transformed[1], transformed[2]);
+        self.draw_triangle(transformed[0], transformed[2], transformed[3]);
+        
+        // Sides
+        self.draw_triangle(transformed[0], transformed[1], transformed[4]);
+        self.draw_triangle(transformed[1], transformed[2], transformed[4]);
+        self.draw_triangle(transformed[2], transformed[3], transformed[4]);
+        self.draw_triangle(transformed[3], transformed[0], transformed[4]);
     }
 }
