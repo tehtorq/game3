@@ -223,7 +223,7 @@ impl EventHandler for Stage {
             println!("Initializing instanced terrain...");
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 160); // 32x original view distance
+                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 320); // 64x original view distance
                 
                 // Create terrain bindings
                 self.terrain_bindings = Bindings {
