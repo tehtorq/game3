@@ -16,6 +16,7 @@ mod game;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
+use bullet::BulletType;
 use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
@@ -321,7 +322,7 @@ impl EventHandler for Stage {
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
-        // Draw lines (bullets, particles, debug) in yellow
+        // Draw player bullets in yellow
         vertices.clear();
         indices.clear();
         
@@ -334,9 +335,11 @@ impl EventHandler for Stage {
             renderer.draw_line(Vec3::new(0.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0));
             renderer.draw_line(Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
             
-            // Draw bullets and particles
+            // Draw player bullets
             for bullet in &self.game.bullets {
-                bullet.draw(&mut renderer);
+                if matches!(bullet.bullet_type, BulletType::Player) {
+                    bullet.draw(&mut renderer);
+                }
             }
             for particle in &self.game.particles {
                 particle.draw(&mut renderer);
@@ -349,6 +352,31 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0]))); // Yellow
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw enemy bullets in orange/red
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            // Draw enemy bullets
+            for bullet in &self.game.bullets {
+                if matches!(bullet.bullet_type, BulletType::Enemy) {
+                    bullet.draw(&mut renderer);
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         

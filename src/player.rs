@@ -56,9 +56,9 @@ impl Player {
 
     pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, boost: bool, dt: f32) {
         const TURN_SPEED: f32 = 2.0;
-        const FORWARD_SPEED: f32 = 500.0;
+        const FORWARD_SPEED: f32 = 375.0;  // Reduced from 500.0 (25% reduction)
         const BOOST_MULTIPLIER: f32 = 2.5;
-        const VERTICAL_SPEED: f32 = 150.0;
+        const VERTICAL_SPEED: f32 = 112.5;  // Reduced from 150.0 (25% reduction)
         
         // Handle rotation
         if left {
