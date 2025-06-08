@@ -41,8 +41,8 @@ pub struct Player {
     pub rotation: f32,
     pub thrust: Vec3,          // Current thrust vector
     pub angular_vel: f32,      // Rotation speed
-    banking: f32,
-    pitch: f32,
+    pub banking: f32,
+    pub pitch: f32,
     pub afterburner_fuel: f32, // 0.0 to 1.0
     pub braking: bool,         // Air brake active
 }
