@@ -12,6 +12,14 @@ pub enum EnemyType {
     Hunter,    // Tracks player position
     Guardian,  // Patrols specific areas
     Laser,     // Enemy with sweeping laser attack
+    Swarm,     // Small enemies that move in groups
+    Phaser,    // Teleporting sniper
+    Shield,    // Creates shields for other enemies
+    Bomber,    // Drops explosive mines
+    Disruptor, // Emits slowing waves
+    Carrier,   // Spawns swarm enemies
+    Reflector, // Reflects bullets back
+    Vortex,    // Creates gravity well
 }
 
 #[derive(Clone, Copy)]
@@ -22,6 +30,10 @@ pub enum MovementPattern {
     Diving,     // Swoops down and up
     Tracking,   // Follows player
     Patrol,     // Moves between waypoints
+    Flocking,   // Swarm movement
+    Teleport,   // Phaser teleportation
+    Stationary, // Shield generator/Vortex
+    Drifting,   // Slow carrier movement
 }
 
 #[derive(Clone)]
@@ -46,6 +58,15 @@ pub struct Enemy {
     laser_target_angle_h: f32,// Target horizontal angle for laser sweep
     laser_target_angle_v: f32,// Target vertical angle for laser sweep
     laser_duration: f32,    // How long the laser has been active
+    // Special ability fields
+    special_cooldown: f32,  // Cooldown for special abilities
+    teleport_charge: f32,   // Phaser teleport charge time
+    shield_radius: f32,     // Shield generator radius
+    mine_count: i32,        // Bomber's remaining mines
+    wave_charge: f32,       // Disruptor wave charge
+    spawn_timer: f32,       // Carrier spawn timer
+    reflection_active: bool,// Reflector state
+    vortex_strength: f32,   // Current vortex pull strength
 }
 
 // Calculate terrain height at a given position (matches shader calculation)
@@ -93,6 +114,14 @@ impl Enemy {
             EnemyType::Hunter => MovementPattern::Tracking,
             EnemyType::Guardian => MovementPattern::Patrol,
             EnemyType::Laser => MovementPattern::Hover,
+            EnemyType::Swarm => MovementPattern::Flocking,
+            EnemyType::Phaser => MovementPattern::Teleport,
+            EnemyType::Shield => MovementPattern::Stationary,
+            EnemyType::Bomber => MovementPattern::Drifting,
+            EnemyType::Disruptor => MovementPattern::Hover,
+            EnemyType::Carrier => MovementPattern::Drifting,
+            EnemyType::Reflector => MovementPattern::Orbital,
+            EnemyType::Vortex => MovementPattern::Stationary,
         };
         
         // Set speed based on enemy type
@@ -103,6 +132,14 @@ impl Enemy {
             EnemyType::Hunter => rng.gen_range(120.0..160.0),
             EnemyType::Guardian => rng.gen_range(60.0..90.0),
             EnemyType::Laser => rng.gen_range(40.0..60.0),
+            EnemyType::Swarm => rng.gen_range(200.0..250.0),
+            EnemyType::Phaser => rng.gen_range(0.0..0.0), // Teleports instead
+            EnemyType::Shield => rng.gen_range(30.0..40.0),
+            EnemyType::Bomber => rng.gen_range(40.0..60.0),
+            EnemyType::Disruptor => rng.gen_range(50.0..70.0),
+            EnemyType::Carrier => rng.gen_range(20.0..30.0),
+            EnemyType::Reflector => rng.gen_range(70.0..90.0),
+            EnemyType::Vortex => rng.gen_range(0.0..0.0), // Stationary
         };
         
         // Set aggression and detection range
@@ -113,6 +150,14 @@ impl Enemy {
             EnemyType::Hunter => (0.9, 1200.0),
             EnemyType::Guardian => (0.4, 400.0),
             EnemyType::Laser => (0.6, 1000.0),
+            EnemyType::Swarm => (0.8, 400.0),
+            EnemyType::Phaser => (0.7, 1500.0),
+            EnemyType::Shield => (0.2, 600.0),
+            EnemyType::Bomber => (0.4, 700.0),
+            EnemyType::Disruptor => (0.5, 800.0),
+            EnemyType::Carrier => (0.3, 1000.0),
+            EnemyType::Reflector => (0.6, 600.0),
+            EnemyType::Vortex => (0.0, 500.0),
         };
         
         let spawn_point = Vec3::new(x, spawn_height, z);
@@ -142,6 +187,23 @@ impl Enemy {
             laser_target_angle_h: 0.0,
             laser_target_angle_v: 0.0,
             laser_duration: 0.0,
+            special_cooldown: 0.0,
+            teleport_charge: 0.0,
+            shield_radius: match enemy_type {
+                EnemyType::Shield => 200.0,
+                _ => 0.0,
+            },
+            mine_count: match enemy_type {
+                EnemyType::Bomber => 5,
+                _ => 0,
+            },
+            wave_charge: 0.0,
+            spawn_timer: 0.0,
+            reflection_active: matches!(enemy_type, EnemyType::Reflector),
+            vortex_strength: match enemy_type {
+                EnemyType::Vortex => 300.0,
+                _ => 0.0,
+            },
         }
     }
     
@@ -157,9 +219,17 @@ impl Enemy {
     }
     
     pub fn update_with_player(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
-        // Special handling for laser enemies
-        if self.enemy_type == EnemyType::Laser {
-            return self.update_laser_enemy(player_pos, dt);
+        // Special handling for enemies with unique behaviors
+        match self.enemy_type {
+            EnemyType::Laser => return self.update_laser_enemy(player_pos, dt),
+            EnemyType::Phaser => return self.update_phaser_enemy(player_pos, dt),
+            EnemyType::Shield => return self.update_shield_enemy(player_pos, dt),
+            EnemyType::Bomber => return self.update_bomber_enemy(player_pos, dt),
+            EnemyType::Disruptor => return self.update_disruptor_enemy(player_pos, dt),
+            EnemyType::Carrier => return self.update_carrier_enemy(player_pos, dt),
+            EnemyType::Reflector => return self.update_reflector_enemy(player_pos, dt),
+            EnemyType::Vortex => return self.update_vortex_enemy(player_pos, dt),
+            _ => {}
         }
         // Update rotation
         self.rotation += self.rotation_speed * dt;
@@ -250,7 +320,7 @@ impl Enemy {
                 // Hunt the player
                 if distance_to_player < self.detection_range {
                     // Lead the target
-                    let lead_time = distance_to_player / self.speed * 0.5;
+                    let _lead_time = distance_to_player / self.speed * 0.5;
                     let predicted_pos = player_pos; // Could add player velocity prediction here
                     
                     let to_target = predicted_pos - self.pos;
@@ -274,6 +344,72 @@ impl Enemy {
                     let to_target = self.target_point - self.pos;
                     self.vel = to_target.normalize_or_zero() * self.speed * 0.5;
                 }
+            },
+            
+            MovementPattern::Flocking => {
+                // Swarm movement - fast and erratic
+                let to_player_norm = to_player.normalize_or_zero();
+                
+                // Add some randomness for swarming effect
+                let swarm_offset = Vec3::new(
+                    (self.phase * 7.0).sin() * 50.0,
+                    (self.phase * 5.0).cos() * 30.0,
+                    (self.phase * 6.0).sin() * 50.0
+                );
+                
+                // Aggressive pursuit with swarm behavior
+                self.vel = (to_player_norm * self.speed + swarm_offset) * self.aggression;
+                
+                // Maintain low altitude for swarming
+                let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
+                let swarm_height = terrain_height + 30.0 + (self.phase * 3.0).sin() * 10.0;
+                self.vel.y = (swarm_height - self.pos.y) * 3.0;
+            },
+            
+            MovementPattern::Teleport => {
+                // Phaser movement - charge then teleport
+                self.teleport_charge += dt;
+                
+                if self.teleport_charge > 2.0 {
+                    // Teleport to new position
+                    let angle = rand::random::<f32>() * PI * 2.0;
+                    let distance = 500.0 + rand::random::<f32>() * 500.0;
+                    
+                    self.pos.x = player_pos.x + angle.cos() * distance;
+                    self.pos.z = player_pos.z + angle.sin() * distance;
+                    
+                    // Set altitude
+                    let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
+                    self.pos.y = terrain_height + 100.0;
+                    
+                    self.teleport_charge = 0.0;
+                    self.special_cooldown = 1.0; // Charge attack after teleport
+                }
+                
+                // No regular movement
+                self.vel = Vec3::ZERO;
+            },
+            
+            MovementPattern::Stationary => {
+                // Shield generator/Vortex - stays in place
+                self.vel = Vec3::ZERO;
+                
+                // Maintain altitude
+                let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
+                let hover_height = terrain_height + 60.0;
+                self.pos.y = self.pos.y * 0.9 + hover_height * 0.1;
+            },
+            
+            MovementPattern::Drifting => {
+                // Bomber/Carrier - slow drift
+                let drift_angle = self.phase * 0.1;
+                self.vel.x = drift_angle.cos() * self.speed;
+                self.vel.z = drift_angle.sin() * self.speed;
+                
+                // Maintain high altitude
+                let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
+                let cruise_height = terrain_height + 150.0;
+                self.vel.y = (cruise_height - self.pos.y).clamp(-20.0, 20.0);
             },
             
             MovementPattern::Patrol => {
@@ -339,6 +475,107 @@ impl Enemy {
                 return Some(to_player.normalize_or_zero());
             }
         }
+        
+        None
+    }
+    
+    // Special enemy update methods
+    fn update_phaser_enemy(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Handle teleportation (already in movement pattern)
+        
+        // Charge and fire after teleport
+        if self.special_cooldown > 0.0 {
+            self.special_cooldown -= dt;
+            if self.special_cooldown <= 0.0 && self.teleport_charge < 0.5 {
+                // Fire precise shot at player
+                let to_player = player_pos - self.pos;
+                return Some(to_player.normalize_or_zero());
+            }
+        }
+        
+        None
+    }
+    
+    fn update_shield_enemy(&mut self, _player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Shield is always active, handled in game logic
+        None
+    }
+    
+    fn update_bomber_enemy(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        if self.special_cooldown > 0.0 {
+            self.special_cooldown -= dt;
+        }
+        
+        // Drop mines periodically
+        let distance_to_player = (player_pos - self.pos).length();
+        if self.mine_count > 0 && self.special_cooldown <= 0.0 && distance_to_player < self.detection_range {
+            self.mine_count -= 1;
+            self.special_cooldown = 1.5;
+            // Mine dropping handled in game logic
+        }
+        
+        None
+    }
+    
+    fn update_disruptor_enemy(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Charge wave attack
+        let distance_to_player = (player_pos - self.pos).length();
+        if distance_to_player < self.detection_range {
+            self.wave_charge += dt;
+            
+            if self.wave_charge > 2.0 {
+                self.wave_charge = 0.0;
+                // Wave emission handled in game logic
+            }
+        }
+        
+        None
+    }
+    
+    fn update_carrier_enemy(&mut self, _player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Spawn timer
+        self.spawn_timer += dt;
+        if self.spawn_timer > 4.0 {
+            self.spawn_timer = 0.0;
+            // Spawning handled in game logic
+        }
+        
+        None
+    }
+    
+    fn update_reflector_enemy(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Always face player for reflection
+        let to_player = player_pos - self.pos;
+        let angle_to_player = to_player.z.atan2(to_player.x);
+        self.rotation.y = angle_to_player;
+        
+        None
+    }
+    
+    fn update_vortex_enemy(&mut self, _player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Pulsing vortex strength
+        self.vortex_strength = 300.0 + (self.phase * 2.0).sin() * 100.0;
         
         None
     }
@@ -465,6 +702,47 @@ impl Enemy {
             None
         }
     }
+    
+    // Getters for special abilities
+    pub fn get_shield_active(&self) -> bool {
+        self.enemy_type == EnemyType::Shield
+    }
+    
+    pub fn get_shield_radius(&self) -> f32 {
+        self.shield_radius
+    }
+    
+    pub fn should_drop_mine(&self) -> bool {
+        self.enemy_type == EnemyType::Bomber && self.special_cooldown <= 0.01 && self.mine_count > 0
+    }
+    
+    pub fn get_wave_active(&self) -> bool {
+        self.enemy_type == EnemyType::Disruptor && self.wave_charge > 2.0
+    }
+    
+    pub fn get_wave_radius(&self) -> f32 {
+        if self.get_wave_active() {
+            (self.wave_charge - 2.0) * 200.0 // Expanding wave
+        } else {
+            0.0
+        }
+    }
+    
+    pub fn should_spawn_swarm(&self) -> bool {
+        self.enemy_type == EnemyType::Carrier && self.spawn_timer >= 4.0
+    }
+    
+    pub fn is_reflecting(&self) -> bool {
+        self.enemy_type == EnemyType::Reflector && self.reflection_active
+    }
+    
+    pub fn get_vortex_strength(&self) -> f32 {
+        if self.enemy_type == EnemyType::Vortex {
+            self.vortex_strength
+        } else {
+            0.0
+        }
+    }
 }
 
 impl Drawable for Enemy {
@@ -526,6 +804,144 @@ impl Drawable for Enemy {
                 let ring_rotation = rotation_matrix(self.rotation.y * 3.0, self.rotation.x * 2.0, 0.0);
                 renderer.draw_cube(self.pos + Vec3::new(0.0, 20.0, 0.0), 25.0, ring_rotation);
                 renderer.draw_cube(self.pos - Vec3::new(0.0, 20.0, 0.0), 25.0, ring_rotation);
+            }
+            EnemyType::Swarm => {
+                // Small triangular shape
+                let size = 15.0;
+                renderer.draw_pyramid(self.pos, size, rotation);
+                // Add small wings
+                let wing_rotation = rotation_matrix(self.phase * 8.0, 0.0, 0.0);
+                renderer.draw_pyramid(self.pos + Vec3::new(10.0, 0.0, 0.0), size * 0.5, wing_rotation);
+                renderer.draw_pyramid(self.pos - Vec3::new(10.0, 0.0, 0.0), size * 0.5, wing_rotation);
+            }
+            EnemyType::Phaser => {
+                // Diamond shape with energy rings
+                let charge_scale = 1.0 + (self.teleport_charge * 0.5).min(1.0);
+                renderer.draw_octahedron(self.pos, 30.0 * charge_scale, rotation);
+                
+                // Energy rings that expand when charging
+                for i in 0..3 {
+                    let ring_scale = 1.0 + (self.teleport_charge + i as f32 * 0.3).sin() * 0.3;
+                    let ring_rotation = rotation_matrix(self.phase * (i + 1) as f32, self.phase * 0.5, 0.0);
+                    renderer.draw_cube(self.pos, 40.0 * ring_scale, ring_rotation);
+                }
+            }
+            EnemyType::Shield => {
+                // Central orb
+                renderer.draw_octahedron(self.pos, 25.0, rotation);
+                
+                // Rotating shield panels
+                for i in 0..6 {
+                    let angle = i as f32 * PI / 3.0 + self.phase;
+                    let panel_pos = self.pos + Vec3::new(
+                        angle.cos() * 40.0,
+                        (angle * 2.0).sin() * 10.0,
+                        angle.sin() * 40.0
+                    );
+                    let panel_rotation = rotation_matrix(angle, self.phase, 0.0);
+                    renderer.draw_cube(panel_pos, 15.0, panel_rotation);
+                }
+            }
+            EnemyType::Bomber => {
+                // Large sphere with spikes
+                renderer.draw_octahedron(self.pos, 40.0, rotation);
+                
+                // Spike indicators
+                for i in 0..self.mine_count {
+                    let angle = i as f32 * PI * 2.0 / 5.0;
+                    let spike_offset = Vec3::new(
+                        angle.cos() * 30.0,
+                        0.0,
+                        angle.sin() * 30.0
+                    );
+                    renderer.draw_pyramid(self.pos + spike_offset, 15.0, rotation);
+                }
+            }
+            EnemyType::Disruptor => {
+                // Twisted spiral shape
+                let twist = self.phase * 2.0;
+                for i in 0..5 {
+                    let height_offset = (i as f32 - 2.0) * 10.0;
+                    let twist_angle = twist + i as f32 * 0.5;
+                    let ring_pos = self.pos + Vec3::new(0.0, height_offset, 0.0);
+                    let ring_rotation = rotation_matrix(twist_angle, 0.0, 0.0);
+                    renderer.draw_cube(ring_pos, 30.0 - i as f32 * 3.0, ring_rotation);
+                }
+                
+                // Charging effect
+                if self.wave_charge > 0.0 {
+                    let charge_size = 50.0 * (self.wave_charge / 2.0).min(1.0);
+                    renderer.draw_octahedron(self.pos, charge_size, rotation);
+                }
+            }
+            EnemyType::Carrier => {
+                // Large hexagonal platform
+                renderer.draw_hexagon_prism(self.pos, 60.0, 20.0, rotation);
+                
+                // Hangar bays
+                for i in 0..4 {
+                    let angle = i as f32 * PI / 2.0;
+                    let bay_offset = Vec3::new(
+                        angle.cos() * 45.0,
+                        -10.0,
+                        angle.sin() * 45.0
+                    );
+                    renderer.draw_cube(self.pos + bay_offset, 20.0, rotation);
+                }
+                
+                // Spawn indicator
+                if self.spawn_timer > 3.0 {
+                    let blink = ((self.spawn_timer - 3.0) * 10.0).sin();
+                    if blink > 0.0 {
+                        renderer.draw_octahedron(self.pos - Vec3::new(0.0, 20.0, 0.0), 15.0, rotation);
+                    }
+                }
+            }
+            EnemyType::Reflector => {
+                // Crystalline shape with mirror facets
+                let facet_rotation = rotation_matrix(self.rotation.y, 0.0, 0.0);
+                
+                // Main crystal
+                renderer.draw_octahedron(self.pos, 35.0, facet_rotation);
+                
+                // Mirror panels
+                for i in 0..8 {
+                    let angle = i as f32 * PI / 4.0;
+                    let panel_offset = Vec3::new(
+                        angle.cos() * 25.0,
+                        0.0,
+                        angle.sin() * 25.0
+                    );
+                    let panel_rotation = rotation_matrix(self.rotation.y + angle, PI / 4.0, 0.0);
+                    renderer.draw_pyramid(self.pos + panel_offset, 15.0, panel_rotation);
+                }
+            }
+            EnemyType::Vortex => {
+                // Swirling energy spiral
+                let vortex_speed = self.phase * 3.0;
+                
+                // Central core
+                renderer.draw_octahedron(self.pos, 20.0, rotation);
+                
+                // Swirling rings
+                for i in 0..8 {
+                    let height = (i as f32 - 4.0) * 15.0;
+                    let ring_angle = vortex_speed + i as f32 * 0.5;
+                    let ring_size = 30.0 + i as f32 * 5.0;
+                    let _ring_pos = self.pos + Vec3::new(0.0, height, 0.0);
+                    let ring_rotation = rotation_matrix(ring_angle, 0.0, 0.0);
+                    
+                    // Draw partial ring to show swirl
+                    for j in 0..3 {
+                        let segment_angle = ring_angle + j as f32 * 2.0 * PI / 3.0;
+                        let segment_offset = Vec3::new(
+                            segment_angle.cos() * ring_size,
+                            height,
+                            segment_angle.sin() * ring_size
+                        );
+                        renderer.draw_cube(segment_offset, 10.0, ring_rotation);
+                    }
+                }
             }
         }
     }

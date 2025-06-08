@@ -1,5 +1,6 @@
 use miniquad::*;
 use glam::Vec3;
+use std::f32::consts::PI;
 
 mod math;
 mod vertex;
@@ -10,6 +11,7 @@ mod player;
 mod enemy;
 mod bullet;
 mod particle;
+mod mine;
 mod camera;
 mod shader;
 mod game;
@@ -294,6 +296,14 @@ impl EventHandler for Stage {
             (EnemyType::Hunter, [1.0, 0.0, 1.0]),     // Magenta - dangerous
             (EnemyType::Guardian, [0.5, 0.5, 0.5]),   // Gray - defensive
             (EnemyType::Laser, [0.0, 0.5, 1.0]),      // Blue - laser enemy
+            (EnemyType::Swarm, [1.0, 1.0, 0.0]),      // Yellow - small/fast
+            (EnemyType::Phaser, [0.8, 0.0, 1.0]),     // Purple - teleporter
+            (EnemyType::Shield, [0.0, 1.0, 1.0]),     // Cyan - support
+            (EnemyType::Bomber, [0.8, 0.2, 0.2]),     // Dark red - explosive
+            (EnemyType::Disruptor, [0.2, 1.0, 0.2]),  // Electric green - debuff
+            (EnemyType::Carrier, [0.3, 0.3, 0.3]),    // Dark gray - spawner
+            (EnemyType::Reflector, [0.9, 0.9, 0.9]),  // Silver - mirror
+            (EnemyType::Vortex, [0.5, 0.0, 0.8]),     // Deep purple - gravity
         ];
         
         for (enemy_type, color) in &enemy_colors {
@@ -490,6 +500,91 @@ impl EventHandler for Stage {
             self.ctx.apply_bindings(&self.bindings);
             // Translucent yellow-orange for glow
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.8, 0.2])));
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw mines in red
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Triangles);
+            
+            for mine in &self.game.mines {
+                mine.draw(&mut renderer);
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.2, 0.2]))); // Dark red
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw shield effects
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            // Draw shield bubbles
+            for enemy in &self.game.enemies {
+                if enemy.get_shield_active() {
+                    let shield_radius = enemy.get_shield_radius();
+                    // Draw shield sphere as lines
+                    for i in 0..16 {
+                        let angle1 = i as f32 * PI * 2.0 / 16.0;
+                        let angle2 = (i + 1) as f32 * PI * 2.0 / 16.0;
+                        
+                        // Horizontal ring
+                        renderer.draw_line(
+                            enemy.pos + Vec3::new(angle1.cos() * shield_radius, 0.0, angle1.sin() * shield_radius),
+                            enemy.pos + Vec3::new(angle2.cos() * shield_radius, 0.0, angle2.sin() * shield_radius)
+                        );
+                        
+                        // Vertical rings
+                        renderer.draw_line(
+                            enemy.pos + Vec3::new(angle1.cos() * shield_radius, angle1.sin() * shield_radius, 0.0),
+                            enemy.pos + Vec3::new(angle2.cos() * shield_radius, angle2.sin() * shield_radius, 0.0)
+                        );
+                        
+                        renderer.draw_line(
+                            enemy.pos + Vec3::new(0.0, angle1.cos() * shield_radius, angle1.sin() * shield_radius),
+                            enemy.pos + Vec3::new(0.0, angle2.cos() * shield_radius, angle2.sin() * shield_radius)
+                        );
+                    }
+                }
+                
+                // Draw disruptor waves
+                if enemy.get_wave_active() {
+                    let wave_radius = enemy.get_wave_radius();
+                    if wave_radius > 0.0 {
+                        for i in 0..32 {
+                            let angle1 = i as f32 * PI * 2.0 / 32.0;
+                            let angle2 = (i + 1) as f32 * PI * 2.0 / 32.0;
+                            
+                            renderer.draw_line(
+                                enemy.pos + Vec3::new(angle1.cos() * wave_radius, 0.0, angle1.sin() * wave_radius),
+                                enemy.pos + Vec3::new(angle2.cos() * wave_radius, 0.0, angle2.sin() * wave_radius)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 1.0]))); // Cyan for shields
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
