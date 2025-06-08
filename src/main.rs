@@ -633,6 +633,18 @@ impl EventHandler for Stage {
 }
 
 fn main() {
+    // Set up panic hook for debugging
+    std::panic::set_hook(Box::new(|panic_info| {
+        eprintln!("\n=== GAME CRASHED ===");
+        if let Some(location) = panic_info.location() {
+            eprintln!("Location: {}:{}", location.file(), location.line());
+        }
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            eprintln!("Error: {}", s);
+        }
+        eprintln!("==================\n");
+    }));
+    
     // Default window size - 75% will be calculated after window creation
     // Using 1200x900 as a reasonable default (75% of 1600x1200)
     let window_width = 1200;

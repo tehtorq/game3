@@ -129,10 +129,12 @@ impl Game {
             if enemy.get_vortex_strength() > 0.0 {
                 let to_vortex = enemy.pos - self.player.pos;
                 let distance = to_vortex.length();
-                if distance < 500.0 && distance > 50.0 {
+                if distance < 500.0 && distance > 10.0 {  // Avoid too close to prevent normalize issues
                     let pull_strength = enemy.get_vortex_strength() * (1.0 - distance / 500.0) * dt;
-                    let pull_dir = to_vortex.normalize();
-                    self.player.pos += pull_dir * pull_strength;
+                    let pull_dir = to_vortex.normalize_or_zero();  // Safe normalize
+                    if pull_dir.length() > 0.0 {
+                        self.player.pos += pull_dir * pull_strength;
+                    }
                 }
             }
             
@@ -397,8 +399,10 @@ impl Game {
                             if dist < 60.0 {
                                 // Reflect bullet back towards player
                                 bullets_to_remove.push(bi);
-                                let reflect_dir = (self.player.pos - enemy.pos).normalize();
-                                reflected_bullets.push((enemy.clone(), reflect_dir));
+                                let reflect_dir = (self.player.pos - enemy.pos).normalize_or_zero();
+                                if reflect_dir.length() > 0.0 {
+                                    reflected_bullets.push((enemy.clone(), reflect_dir));
+                                }
                                 break;
                             }
                         }

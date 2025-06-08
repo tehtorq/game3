@@ -50,6 +50,12 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn draw_cube(&mut self, center: Vec3, size: f32, rotation: Mat4) {
+        // Safety check
+        if center.is_nan() || size.is_nan() || size <= 0.0 {
+            println!("WARNING: draw_cube called with invalid params: center={:?}, size={}", center, size);
+            return;
+        }
+        
         let half = size / 2.0;
         let corners = [
             Vec3::new(-half, -half, -half),
@@ -92,6 +98,12 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn draw_pyramid(&mut self, center: Vec3, size: f32, rotation: Mat4) {
+        // Safety check
+        if center.is_nan() || size.is_nan() || size <= 0.0 {
+            println!("WARNING: draw_pyramid called with invalid params: center={:?}, size={}", center, size);
+            return;
+        }
+        
         let half = size / 2.0;
         let points = [
             Vec3::new(-half, 0.0, -half),
@@ -118,6 +130,12 @@ impl<'a> Renderer<'a> {
     }
     
     pub fn draw_octahedron(&mut self, center: Vec3, size: f32, rotation: Mat4) {
+        // Safety check
+        if center.is_nan() || size.is_nan() || size <= 0.0 {
+            println!("WARNING: draw_octahedron called with invalid params: center={:?}, size={}", center, size);
+            return;
+        }
+        
         let points = [
             Vec3::new(0.0, -size, 0.0),  // Bottom
             Vec3::new(0.0, size, 0.0),   // Top

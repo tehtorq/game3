@@ -133,13 +133,13 @@ impl Enemy {
             EnemyType::Guardian => rng.gen_range(60.0..90.0),
             EnemyType::Laser => rng.gen_range(40.0..60.0),
             EnemyType::Swarm => rng.gen_range(200.0..250.0),
-            EnemyType::Phaser => rng.gen_range(0.0..0.0), // Teleports instead
+            EnemyType::Phaser => 0.0, // Teleports instead, no speed needed
             EnemyType::Shield => rng.gen_range(30.0..40.0),
             EnemyType::Bomber => rng.gen_range(40.0..60.0),
             EnemyType::Disruptor => rng.gen_range(50.0..70.0),
             EnemyType::Carrier => rng.gen_range(20.0..30.0),
             EnemyType::Reflector => rng.gen_range(70.0..90.0),
-            EnemyType::Vortex => rng.gen_range(0.0..0.0), // Stationary
+            EnemyType::Vortex => 0.0, // Stationary, no speed needed
         };
         
         // Set aggression and detection range
@@ -219,6 +219,11 @@ impl Enemy {
     }
     
     pub fn update_with_player(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        // Wrap phase to prevent overflow
+        if self.phase > 1000.0 {
+            self.phase = self.phase % (2.0 * PI);
+        }
+        
         // Special handling for enemies with unique behaviors
         match self.enemy_type {
             EnemyType::Laser => return self.update_laser_enemy(player_pos, dt),
@@ -231,8 +236,10 @@ impl Enemy {
             EnemyType::Vortex => return self.update_vortex_enemy(player_pos, dt),
             _ => {}
         }
-        // Update rotation
-        self.rotation += self.rotation_speed * dt;
+        // Update rotation with wrapping
+        self.rotation.x = (self.rotation.x + self.rotation_speed.x * dt) % (2.0 * PI);
+        self.rotation.y = (self.rotation.y + self.rotation_speed.y * dt) % (2.0 * PI);
+        self.rotation.z = (self.rotation.z + self.rotation_speed.z * dt) % (2.0 * PI);
         self.phase += dt;
         
         // Update attack cooldown
@@ -445,6 +452,13 @@ impl Enemy {
         
         // Update position
         self.pos += self.vel * dt;
+        
+        // Check for NaN after position update
+        if self.pos.is_nan() {
+            println!("ERROR: Enemy position became NaN! Type: {:?}, Vel: {:?}", self.enemy_type, self.vel);
+            self.pos = self.spawn_point; // Reset to spawn
+            self.vel = Vec3::ZERO;
+        }
         
         // Ensure enemies don't go below terrain
         let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
@@ -747,6 +761,13 @@ impl Enemy {
 
 impl Drawable for Enemy {
     fn draw(&self, renderer: &mut Renderer) {
+        // Check for NaN values
+        if self.pos.is_nan() || self.rotation.is_nan() {
+            println!("WARNING: Enemy has NaN values! Type: {:?}, Pos: {:?}, Rotation: {:?}", 
+                self.enemy_type, self.pos, self.rotation);
+            return;
+        }
+        
         let rotation = rotation_matrix(self.rotation.y, self.rotation.x, self.rotation.z);
         
         match self.enemy_type {
@@ -769,6 +790,7 @@ impl Drawable for Enemy {
                 // Central octahedron
                 renderer.draw_octahedron(self.pos, 25.0, rotation);
                 // Three rotating rings
+                // Removed debug logging
                 let ring1 = rotation_matrix(self.rotation.y * 2.0, 0.0, 0.0);
                 let ring2 = rotation_matrix(0.0, self.rotation.x * 2.0, 0.0);
                 let ring3 = rotation_matrix(0.0, 0.0, self.rotation.z * 2.0);
@@ -822,7 +844,13 @@ impl Drawable for Enemy {
                 // Energy rings that expand when charging
                 for i in 0..3 {
                     let ring_scale = 1.0 + (self.teleport_charge + i as f32 * 0.3).sin() * 0.3;
-                    let ring_rotation = rotation_matrix(self.phase * (i + 1) as f32, self.phase * 0.5, 0.0);
+                    // Wrap phase to prevent numerical issues
+                    let phase_wrapped = self.phase % (2.0 * PI);
+                    let ring_rotation = rotation_matrix(
+                        phase_wrapped * (i + 1) as f32,
+                        phase_wrapped * 0.5,
+                        0.0
+                    );
                     renderer.draw_cube(self.pos, 40.0 * ring_scale, ring_rotation);
                 }
             }
@@ -832,13 +860,14 @@ impl Drawable for Enemy {
                 
                 // Rotating shield panels
                 for i in 0..6 {
-                    let angle = i as f32 * PI / 3.0 + self.phase;
+                    let phase_wrapped = self.phase % (2.0 * PI);
+                    let angle = i as f32 * PI / 3.0 + phase_wrapped;
                     let panel_pos = self.pos + Vec3::new(
                         angle.cos() * 40.0,
                         (angle * 2.0).sin() * 10.0,
                         angle.sin() * 40.0
                     );
-                    let panel_rotation = rotation_matrix(angle, self.phase, 0.0);
+                    let panel_rotation = rotation_matrix(angle % (2.0 * PI), phase_wrapped, 0.0);
                     renderer.draw_cube(panel_pos, 15.0, panel_rotation);
                 }
             }
