@@ -47,6 +47,14 @@ pub struct Player {
     pub braking: bool,         // Air brake active
     pub shield: f32,           // Shield strength 0.0 to 1.0
     pub shield_recharge_timer: f32, // Time until shield starts recharging
+    pub trail_points: Vec<TrailPoint>, // Engine trail
+    trail_timer: f32,          // Timer for adding trail points
+}
+
+#[derive(Clone)]
+pub struct TrailPoint {
+    pub pos: Vec3,
+    pub lifetime: f32,
 }
 
 impl Player {
@@ -63,6 +71,8 @@ impl Player {
             braking: false,
             shield: 1.0,
             shield_recharge_timer: 0.0,
+            trail_points: Vec::new(),
+            trail_timer: 0.0,
         }
     }
 
@@ -170,6 +180,9 @@ impl Player {
             self.vel.y = self.vel.y.min(0.0);
         }
         
+        // Update trail
+        self.update_trail(dt, boost);
+        
         // Update shield recharge
         if self.shield_recharge_timer > 0.0 {
             self.shield_recharge_timer -= dt;
@@ -204,6 +217,52 @@ impl Player {
             false // Shield absorbed the damage
         } else {
             true // No shield, player takes damage
+        }
+    }
+    
+    fn update_trail(&mut self, dt: f32, boost: bool) {
+        // Update existing trail points
+        self.trail_points.retain_mut(|point| {
+            point.lifetime -= dt;
+            point.lifetime > 0.0
+        });
+        
+        // Add new trail points
+        self.trail_timer -= dt;
+        if self.trail_timer <= 0.0 {
+            // Calculate wing tip positions using rotation matrix
+            let rotation = rotation_matrix(self.rotation, self.pitch, self.banking);
+            let scale = 20.0; // Match the ship scale
+            
+            // Left wing tip
+            let left_wing_offset = rotation.transform_vector3(Vec3::new(-scale, 0.0, scale * 0.5));
+            let left_pos = self.pos + left_wing_offset;
+            
+            // Right wing tip  
+            let right_wing_offset = rotation.transform_vector3(Vec3::new(scale, 0.0, scale * 0.5));
+            let right_pos = self.pos + right_wing_offset;
+            
+            // Add trail points with longer lifetime when boosting
+            let lifetime = if boost { 0.6 } else { 0.3 };
+            
+            self.trail_points.push(TrailPoint {
+                pos: left_pos,
+                lifetime,
+            });
+            
+            self.trail_points.push(TrailPoint {
+                pos: right_pos,
+                lifetime,
+            });
+            
+            // Reset timer - faster trail spawn for smoother lines
+            self.trail_timer = 0.02; // Always fast for smooth trails
+        }
+        
+        // Limit trail length
+        const MAX_TRAIL_POINTS: usize = 120;
+        if self.trail_points.len() > MAX_TRAIL_POINTS {
+            self.trail_points.drain(0..self.trail_points.len() - MAX_TRAIL_POINTS);
         }
     }
 }

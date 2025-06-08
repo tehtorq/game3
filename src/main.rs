@@ -447,6 +447,45 @@ impl EventHandler for Stage {
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
+        // Draw player contrails first (so they appear behind the ship)
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            // Draw trails as separate lines for each wing
+            let trail_points = &self.game.player.trail_points;
+            if trail_points.len() >= 4 {
+                // Draw left wing trail (even indices)
+                for i in (0..trail_points.len() - 2).step_by(2) {
+                    let alpha = trail_points[i].lifetime / 0.6; // Max lifetime is 0.6
+                    if alpha > 0.0 && i + 2 < trail_points.len() {
+                        renderer.draw_line(trail_points[i].pos, trail_points[i + 2].pos);
+                    }
+                }
+                
+                // Draw right wing trail (odd indices)
+                for i in (1..trail_points.len() - 2).step_by(2) {
+                    let alpha = trail_points[i].lifetime / 0.6;
+                    if alpha > 0.0 && i + 2 < trail_points.len() {
+                        renderer.draw_line(trail_points[i].pos, trail_points[i + 2].pos);
+                    }
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            // Pure white color for trails
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0])));
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
         // Draw player in cyan
         vertices.clear();
         indices.clear();
