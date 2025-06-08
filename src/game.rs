@@ -212,8 +212,8 @@ impl Game {
             self.wave += 1;  // Increment wave counter
             println!("Spawning wave {}", self.wave);
             self.spawn_wave();
-            // Longer spawn intervals: 5-8 seconds based on wave
-            self.enemy_spawn_timer = (8.0 - (self.wave as f32 * 0.3)).max(5.0);
+            // Spawn intervals: 8-15 seconds
+            self.enemy_spawn_timer = (15.0 - (self.wave as f32 * 0.5)).max(8.0);
         }
     }
 
@@ -265,8 +265,8 @@ impl Game {
             for i in 0..count {
                 let total_enemies: usize = template.iter().map(|(_, c)| c).sum();
                 let angle_offset = ((spawn_count + i) as f32 / total_enemies as f32 - 0.5) * PI * 0.8;
-                // Spawn much farther ahead: 2000-4000 units
-                let distance = rng.gen_range(2000.0..4000.0);
+                // Spawn at reasonable distance: 300-600 units
+                let distance = rng.gen_range(300.0..600.0);
                 let spawn_angle = self.player.rotation + angle_offset;
                 
                 let x = self.player.pos.x - spawn_angle.sin() * distance;
@@ -283,9 +283,9 @@ impl Game {
         for &(enemy_type, count) in template {
             for i in 0..count {
                 let side = if i % 2 == 0 { -1.0 } else { 1.0 };
-                // Spawn farther ahead and to the sides
-                let forward_offset = rng.gen_range(1500.0..2500.0);
-                let side_offset = rng.gen_range(800.0..1500.0) * side;
+                // Spawn at reasonable distances
+                let forward_offset = rng.gen_range(200.0..400.0);
+                let side_offset = rng.gen_range(150.0..300.0) * side;
                 
                 let spawn_angle = self.player.rotation;
                 let x = self.player.pos.x - spawn_angle.sin() * forward_offset + spawn_angle.cos() * side_offset;
@@ -304,8 +304,8 @@ impl Game {
         for &(enemy_type, count) in template {
             for i in 0..count {
                 let angle = ((spawn_count + i) as f32 / total_enemies as f32) * PI * 2.0;
-                // Larger surrounding circle
-                let distance = rng.gen_range(1500.0..2500.0);
+                // Surrounding circle at reasonable distance
+                let distance = rng.gen_range(400.0..600.0);
                 
                 let x = self.player.pos.x + angle.cos() * distance;
                 let z = self.player.pos.z + angle.sin() * distance;
@@ -322,8 +322,8 @@ impl Game {
             for i in 0..count {
                 let angle_offset = rng.gen_range(-PI/4.0..PI/4.0);
                 let spawn_angle = self.player.rotation + PI + angle_offset; // Behind player
-                // Even ambushes spawn farther away
-                let distance = rng.gen_range(1000.0..1800.0);
+                // Ambushes spawn behind at reasonable distance
+                let distance = rng.gen_range(200.0..400.0);
                 
                 let x = self.player.pos.x - spawn_angle.sin() * distance;
                 let z = self.player.pos.z - spawn_angle.cos() * distance;

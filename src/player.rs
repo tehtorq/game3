@@ -39,8 +39,12 @@ pub struct Player {
     pub pos: Vec3,
     pub vel: Vec3,
     pub rotation: f32,
+    pub thrust: Vec3,          // Current thrust vector
+    pub angular_vel: f32,      // Rotation speed
     banking: f32,
     pitch: f32,
+    pub afterburner_fuel: f32, // 0.0 to 1.0
+    pub braking: bool,         // Air brake active
 }
 
 impl Player {
@@ -49,76 +53,134 @@ impl Player {
             pos: Vec3::new(0.0, 50.0, 0.0),
             vel: Vec3::ZERO,
             rotation: 0.0,
+            thrust: Vec3::ZERO,
+            angular_vel: 0.0,
             banking: 0.0,
             pitch: 0.0,
+            afterburner_fuel: 1.0,
+            braking: false,
         }
     }
 
     pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, boost: bool, dt: f32) {
-        const TURN_SPEED: f32 = 2.0;
-        const FORWARD_SPEED: f32 = 375.0;  // Reduced from 500.0 (25% reduction)
-        const BOOST_MULTIPLIER: f32 = 2.5;
-        const VERTICAL_SPEED: f32 = 112.5;  // Reduced from 150.0 (25% reduction)
+        // Physics constants
+        const TURN_ACCELERATION: f32 = 8.0;  // Doubled for snappier turning
+        const TURN_DAMPING: f32 = 0.9;      // Less damping for more responsive controls
+        const MAX_TURN_SPEED: f32 = 4.0;    // Slightly faster max turn rate
         
-        // Handle rotation
-        if left {
-            self.rotation -= TURN_SPEED * dt;
-        }
-        if right {
-            self.rotation += TURN_SPEED * dt;
-        }
+        const THRUST_POWER: f32 = 1200.0;   // More than doubled for snappier acceleration
+        const VERTICAL_THRUST: f32 = 600.0;  // Doubled for better vertical control
+        const AFTERBURNER_MULTIPLIER: f32 = 2.5;  // More powerful boost
+        const AFTERBURNER_DRAIN: f32 = 0.33; // 3 seconds of fuel
+        const AFTERBURNER_REGEN: f32 = 0.15; // Faster regen (6.7 seconds to refill)
         
-        // Update banking based on turning
-        let target_banking = if left {
-            -0.5
-        } else if right {
-            0.5
+        const AIR_DRAG: f32 = 1.5;          // Much higher drag for tighter control
+        const BRAKE_DRAG: f32 = 4.0;        // Stronger brakes
+        const GRAVITY: f32 = 80.0;          // Slightly stronger gravity
+        const MAX_SPEED: f32 = 600.0;       // Reduced for tighter gameplay
+        const MAX_VERTICAL_SPEED: f32 = 300.0;  // Reduced to match
+        
+        // Handle rotation with acceleration
+        let turn_input = (right as i32 - left as i32) as f32;
+        self.angular_vel += turn_input * TURN_ACCELERATION * dt;
+        self.angular_vel = self.angular_vel.clamp(-MAX_TURN_SPEED, MAX_TURN_SPEED);
+        self.angular_vel *= TURN_DAMPING; // Damping
+        self.rotation += self.angular_vel * dt;
+        
+        // Update banking based on angular velocity - more responsive
+        let target_banking = self.angular_vel / MAX_TURN_SPEED * 0.8;  // More pronounced banking
+        self.banking = self.banking * 0.7 + target_banking * 0.3;      // Faster response
+        
+        // Update pitch based on vertical input - more responsive
+        let target_pitch = (down as i32 - up as i32) as f32 * 0.4;    // More pronounced pitch
+        self.pitch = self.pitch * 0.8 + target_pitch * 0.2;           // Faster response
+        
+        // Calculate thrust based on inputs
+        let forward_dir = Vec3::new(-self.rotation.sin(), 0.0, -self.rotation.cos());
+        let mut thrust_magnitude = THRUST_POWER;
+        
+        // Afterburner system
+        if boost && self.afterburner_fuel > 0.0 {
+            thrust_magnitude *= AFTERBURNER_MULTIPLIER;
+            self.afterburner_fuel = (self.afterburner_fuel - AFTERBURNER_DRAIN * dt).max(0.0);
         } else {
-            0.0
-        };
-        self.banking = self.banking * 0.9 + target_banking * 0.1;
+            self.afterburner_fuel = (self.afterburner_fuel + AFTERBURNER_REGEN * dt).min(1.0);
+        }
         
-        // Update pitch for vertical movement (swapped to match controls)
-        let target_pitch = if up {
-            -0.3
-        } else if down {
-            0.3
-        } else {
-            0.0
-        };
-        self.pitch = self.pitch * 0.9 + target_pitch * 0.1;
+        // Apply forward thrust
+        self.thrust = forward_dir * thrust_magnitude;
         
-        // Calculate forward direction based on rotation
-        let speed = if boost { FORWARD_SPEED * BOOST_MULTIPLIER } else { FORWARD_SPEED };
-        let forward = Vec3::new(
-            -self.rotation.sin() * speed,
-            0.0,
-            -self.rotation.cos() * speed
-        );
-        
-        // Set velocity based on rotation and inputs
-        self.vel = forward;
-        
-        // Add vertical movement (swapped)
+        // Add vertical thrust
         if up {
-            self.vel.y = -VERTICAL_SPEED;
+            self.thrust.y -= VERTICAL_THRUST;
         }
         if down {
-            self.vel.y = VERTICAL_SPEED;
+            self.thrust.y += VERTICAL_THRUST;
         }
         
+        // Apply thrust to velocity
+        self.vel += self.thrust * dt;
+        
+        // Apply drag (more when braking)
+        self.braking = self.thrust.length() < 0.1 && (left || right || up || down);
+        let drag = if self.braking { BRAKE_DRAG } else { AIR_DRAG };
+        self.vel *= 1.0 - (drag * dt);
+        
+        // Apply gravity
+        self.vel.y -= GRAVITY * dt;
+        
+        // Limit speeds
+        let horizontal_speed = Vec3::new(self.vel.x, 0.0, self.vel.z).length();
+        if horizontal_speed > MAX_SPEED {
+            let scale = MAX_SPEED / horizontal_speed;
+            self.vel.x *= scale;
+            self.vel.z *= scale;
+        }
+        self.vel.y = self.vel.y.clamp(-MAX_VERTICAL_SPEED, MAX_VERTICAL_SPEED);
+        
+        // Update position
         self.pos += self.vel * dt;
         
         // Constrain player height based on terrain below
         let terrain_below = terrain_height_at(self.pos.x, self.pos.z);
-        let min_height = terrain_below + 10.0; // Stay at least 10 units above terrain
+        let min_height = terrain_below + 10.0;
         
-        // Maximum terrain height is roughly base_y (20) + max amplitude (440) = 460
-        // But to be safe, let's calculate a reasonable max flight height
-        let max_amplitude = 440.0; // Approximate maximum terrain variation
-        let flight_ceiling = terrain_below + max_amplitude;
+        if self.pos.y < min_height {
+            self.pos.y = min_height;
+            self.vel.y = self.vel.y.max(0.0); // Stop downward velocity
+            
+            // Ground effect - reduce drag and provide lift when close to terrain
+            let height_above_terrain = self.pos.y - terrain_below;
+            if height_above_terrain < 100.0 {
+                // Stronger ground effect that scales with proximity
+                let effect_strength = 1.0 - (height_above_terrain / 100.0);
+                self.vel *= 1.0 + (0.05 * effect_strength); // Up to 5% speed boost
+                self.vel.y += 20.0 * effect_strength * dt;  // Upward cushion effect
+            }
+        }
         
-        self.pos.y = self.pos.y.clamp(min_height, flight_ceiling);
+        // Max altitude (above sea level, not terrain)
+        const MAX_ALTITUDE: f32 = 1000.0;
+        if self.pos.y > MAX_ALTITUDE {
+            self.pos.y = MAX_ALTITUDE;
+            self.vel.y = self.vel.y.min(0.0);
+        }
+    }
+    
+    pub fn get_speed(&self) -> f32 {
+        self.vel.length()
+    }
+    
+    pub fn get_altitude(&self) -> f32 {
+        self.pos.y
+    }
+    
+    pub fn get_terrain_height(&self) -> f32 {
+        terrain_height_at(self.pos.x, self.pos.z)
+    }
+    
+    pub fn get_height_above_terrain(&self) -> f32 {
+        self.pos.y - self.get_terrain_height()
     }
 }
 

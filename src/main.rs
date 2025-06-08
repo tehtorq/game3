@@ -1,5 +1,5 @@
 use miniquad::*;
-use glam::Vec3;
+use glam::{Vec3, Mat4};
 use std::f32::consts::PI;
 
 mod math;
@@ -12,6 +12,7 @@ mod enemy;
 mod bullet;
 mod particle;
 mod mine;
+mod hud;
 mod camera;
 mod shader;
 mod game;
@@ -20,6 +21,7 @@ use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
 use bullet::BulletType;
 use enemy::EnemyType;
+use hud::HUD;
 use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
@@ -38,6 +40,7 @@ struct Stage {
     input: InputState,
     paused: bool,
     instanced_terrain: Option<InstancedTerrain>,
+    hud: HUD,
     // FPS tracking fields
     frame_count: u32,
     fps_timer: f64,
@@ -173,7 +176,7 @@ impl Stage {
             images: vec![],
         };
 
-        let mut stage = Self {
+        let stage = Self {
             ctx,
             line_pipeline,
             triangle_pipeline,
@@ -185,6 +188,7 @@ impl Stage {
             input: InputState::default(),
             paused: false,
             instanced_terrain: None,
+            hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
             last_frame_time: miniquad::date::now(),
@@ -588,6 +592,32 @@ impl EventHandler for Stage {
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
+        // Draw HUD (should be last to appear on top)
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            let (width, height) = window::screen_size();
+            self.hud.draw(&mut renderer, &self.game, width, height);
+        }
+        
+        if !vertices.is_empty() {
+            // Create orthographic projection for HUD
+            let hud_proj = Mat4::orthographic_rh_gl(-aspect * 40.0, aspect * 40.0, -40.0, 40.0, 0.1, 100.0);
+            let hud_view = Mat4::IDENTITY;
+            let hud_mvp = hud_proj * hud_view;
+            
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(hud_mvp, [1.0, 1.0, 1.0]))); // White for HUD
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
     }
@@ -615,6 +645,8 @@ impl EventHandler for Stage {
                     window::set_window_size(1200, 900);
                 }
             }
+            KeyCode::Minus | KeyCode::KpSubtract => self.hud.zoom_out(),
+            KeyCode::Equal | KeyCode::KpAdd => self.hud.zoom_in(),
             _ => {}
         }
     }
