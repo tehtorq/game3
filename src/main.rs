@@ -12,7 +12,9 @@ mod enemy;
 mod bullet;
 mod particle;
 mod mine;
+mod crystal;
 mod hud;
+mod base;
 mod camera;
 mod shader;
 mod game;
@@ -20,7 +22,7 @@ mod game;
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
 use bullet::BulletType;
-use enemy::EnemyType;
+use enemy::{EnemyType, AlertState};
 use hud::HUD;
 use camera::Camera;
 use game::Game;
@@ -288,9 +290,34 @@ impl EventHandler for Stage {
             self.ctx.draw(0, terrain.index_count(), terrain.instance_count());
         }
         
-        // Draw enemies with different colors per type
+        // Draw bases first (in red/orange)
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Triangles);
+            
+            for base in &self.game.bases {
+                if base.is_active {
+                    base.draw(&mut renderer);
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            // Red-orange color for bases
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.3, 0.1])));
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw enemies with different colors per type
+        vertices.clear();
+        indices.clear();
         
         // Group enemies by type for batch rendering with different colors
         let enemy_colors = [
@@ -320,6 +347,31 @@ impl EventHandler for Stage {
                 
                 for enemy in &self.game.enemies {
                     if enemy.enemy_type == *enemy_type {
+                        // Modify color based on alert state
+                        let _alert_color = match enemy.alert_state {
+                            AlertState::Alert => {
+                                // Flash red when actively attacking
+                                let flash = (self.game.enemy_spawn_timer * 5.0).sin() * 0.5 + 0.5;
+                                [color[0] + flash * (1.0 - color[0]), 
+                                 color[1] * (1.0 - flash * 0.5), 
+                                 color[2] * (1.0 - flash * 0.5)]
+                            }
+                            AlertState::Suspicious => {
+                                // Yellow tint when suspicious
+                                [color[0] + 0.3, color[1] + 0.3, color[2]]
+                            }
+                            AlertState::Searching => {
+                                // Orange tint when searching
+                                [color[0] + 0.5, color[1] + 0.2, color[2]]
+                            }
+                            _ => *color, // Normal color
+                        };
+                        
+                        // Store current color for this batch
+                        if enemy.alert_state != AlertState::Unaware && enemy.alert_state != AlertState::Returning {
+                            // We'll need to draw this enemy separately with its alert color
+                            // For now, just draw normally - we'll handle alert indicators separately
+                        }
                         enemy.draw(&mut renderer);
                     }
                 }
@@ -333,6 +385,66 @@ impl EventHandler for Stage {
                 self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, *color)));
                 self.ctx.draw(0, indices.len() as i32, 1);
             }
+        }
+        
+        // Draw alert indicators for enemies
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            for enemy in &self.game.enemies {
+                match enemy.alert_state {
+                    AlertState::Alert => {
+                        // Draw exclamation mark above enemy
+                        let base_pos = enemy.pos + Vec3::new(0.0, 40.0, 0.0);
+                        renderer.draw_line(base_pos, base_pos + Vec3::new(0.0, 15.0, 0.0));
+                        renderer.draw_line(
+                            base_pos + Vec3::new(0.0, 20.0, 0.0),
+                            base_pos + Vec3::new(0.0, 22.0, 0.0)
+                        );
+                    }
+                    AlertState::Suspicious => {
+                        // Draw question mark above enemy
+                        let base_pos = enemy.pos + Vec3::new(0.0, 40.0, 0.0);
+                        let segments = 8;
+                        for i in 0..segments {
+                            let angle1 = i as f32 * PI / segments as f32;
+                            let angle2 = (i + 1) as f32 * PI / segments as f32;
+                            let p1 = base_pos + Vec3::new(angle1.cos() * 5.0, angle1.sin() * 5.0 + 15.0, 0.0);
+                            let p2 = base_pos + Vec3::new(angle2.cos() * 5.0, angle2.sin() * 5.0 + 15.0, 0.0);
+                            renderer.draw_line(p1, p2);
+                        }
+                        renderer.draw_line(
+                            base_pos + Vec3::new(0.0, 0.0, 0.0),
+                            base_pos + Vec3::new(0.0, 2.0, 0.0)
+                        );
+                    }
+                    AlertState::Searching => {
+                        // Draw rotating search lines
+                        let base_pos = enemy.pos + Vec3::new(0.0, 30.0, 0.0);
+                        let search_angle = self.game.enemy_spawn_timer * 2.0;
+                        for i in 0..3 {
+                            let angle = search_angle + i as f32 * PI * 2.0 / 3.0;
+                            let end_pos = base_pos + Vec3::new(angle.cos() * 15.0, 0.0, angle.sin() * 15.0);
+                            renderer.draw_line(base_pos, end_pos);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            // White color for alert indicators
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0])));
+            self.ctx.draw(0, indices.len() as i32, 1);
         }
         
         // Draw player in cyan
@@ -352,6 +464,68 @@ impl EventHandler for Stage {
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 1.0]))); // Cyan
             self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw player shield effect
+        if self.game.player.shield > 0.0 {
+            vertices.clear();
+            indices.clear();
+            
+            {
+                let mut renderer = Renderer::new(&mut vertices, &mut indices);
+                renderer.set_mode(RenderMode::Lines);
+                
+                // Draw shield bubble around player
+                let shield_radius = 30.0;
+                let shield_segments = 16;
+                
+                // Draw horizontal rings
+                for j in 0..3 {
+                    let y_offset = (j as f32 - 1.0) * shield_radius * 0.5;
+                    let ring_radius = (1.0 - (y_offset / shield_radius).abs()) * shield_radius;
+                    
+                    for i in 0..shield_segments {
+                        let angle1 = i as f32 * PI * 2.0 / shield_segments as f32;
+                        let angle2 = (i + 1) as f32 * PI * 2.0 / shield_segments as f32;
+                        
+                        let p1 = self.game.player.pos + Vec3::new(
+                            angle1.cos() * ring_radius,
+                            y_offset,
+                            angle1.sin() * ring_radius
+                        );
+                        let p2 = self.game.player.pos + Vec3::new(
+                            angle2.cos() * ring_radius,
+                            y_offset,
+                            angle2.sin() * ring_radius
+                        );
+                        
+                        renderer.draw_line(p1, p2);
+                    }
+                }
+                
+                // Draw vertical lines
+                for i in 0..8 {
+                    let angle = i as f32 * PI * 2.0 / 8.0;
+                    let x = angle.cos() * shield_radius;
+                    let z = angle.sin() * shield_radius;
+                    
+                    renderer.draw_line(
+                        self.game.player.pos + Vec3::new(x, -shield_radius * 0.5, z),
+                        self.game.player.pos + Vec3::new(x, shield_radius * 0.5, z)
+                    );
+                }
+            }
+            
+            if !vertices.is_empty() {
+                self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+                self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+                self.ctx.apply_pipeline(&self.line_pipeline);
+                self.ctx.apply_bindings(&self.bindings);
+                // Blue-ish shield color with transparency effect based on shield strength
+                let shield_color = [0.0, 0.5 * self.game.player.shield, 1.0 * self.game.player.shield];
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, shield_color)));
+                self.ctx.draw(0, indices.len() as i32, 1);
+            }
         }
         
         // Draw player bullets in yellow

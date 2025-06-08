@@ -8,12 +8,12 @@
   - [ ] Crystal counter in HUD
   - [ ] Victory condition when all collected
 
-- [ ] **Enemy Bases**
-  - [ ] Design base structure (multi-part destructible)
-  - [ ] Place bases at terrain landmarks
-  - [ ] Base defenses (turrets, shield generators)
-  - [ ] Destruction sequence and effects
-  - [ ] Stop enemy spawning when base destroyed
+- [x] **Enemy Bases**
+  - [x] Design base structure (multi-part destructible)
+  - [x] Place bases at terrain landmarks
+  - [x] Base defenses (turrets, shield generators)
+  - [x] Destruction sequence and effects
+  - [x] Stop enemy spawning when base destroyed
 
 - [ ] **Rescue Missions**
   - [ ] Friendly ship AI and pathfinding
@@ -34,55 +34,55 @@
   - [ ] Scanner upgrade system
 
 ## 2. Better Flight Physics
-- [ ] **Momentum & Inertia**
-  - [ ] Velocity-based movement instead of direct control
-  - [ ] Separate thrust and rotation controls
-  - [ ] Drift mechanics
-  - [ ] Max speed limits
+- [x] **Momentum & Inertia**
+  - [x] Velocity-based movement instead of direct control
+  - [x] Separate thrust and rotation controls
+  - [x] Drift mechanics
+  - [x] Max speed limits
 
-- [ ] **Enhanced Banking**
-  - [ ] Automatic banking based on turn rate
-  - [ ] Visual ship tilt
-  - [ ] Affects turn radius
+- [x] **Enhanced Banking**
+  - [x] Automatic banking based on turn rate
+  - [x] Visual ship tilt
+  - [x] Affects turn radius
 
-- [ ] **Altitude Effects**
-  - [ ] Thinner air at high altitude (less drag)
-  - [ ] Ground effect near terrain
+- [x] **Altitude Effects**
+  - [x] Thinner air at high altitude (less drag)
+  - [x] Ground effect near terrain
   - [ ] Turbulence in certain areas
 
-- [ ] **Air Brakes**
-  - [ ] Quick deceleration key
-  - [ ] Visual brake indicators
+- [x] **Air Brakes**
+  - [x] Quick deceleration key
+  - [x] Visual brake indicators
   - [ ] Heat buildup from braking
 
-- [ ] **Afterburner System**
-  - [ ] Limited fuel gauge
-  - [ ] Regeneration over time
+- [x] **Afterburner System**
+  - [x] Limited fuel gauge
+  - [x] Regeneration over time
   - [ ] Visual thrust effects
   - [ ] Heat management
 
-- [ ] **Gravity System**
-  - [ ] Constant downward force
+- [x] **Gravity System**
+  - [x] Constant downward force
   - [ ] Stronger near massive terrain
-  - [ ] Affects projectiles
+  - [x] Affects projectiles
 
 ## 3. Enemy Spawn Improvements
-- [ ] **Enemy Patrols**
-  - [ ] Waypoint system for enemies
-  - [ ] Patrol routes around terrain
+- [x] **Enemy Patrols**
+  - [x] Waypoint system for enemies
+  - [x] Patrol routes around terrain
   - [ ] Alert states (patrol/search/attack)
 
-- [ ] **Enemy Nests/Bases**
-  - [ ] Fixed spawn locations
-  - [ ] Destructible spawners
-  - [ ] Increasing difficulty near bases
-  - [ ] Visual spawn animations
+- [x] **Enemy Nests/Bases**
+  - [x] Fixed spawn locations
+  - [x] Destructible spawners
+  - [x] Increasing difficulty near bases
+  - [x] Visual spawn animations
 
-- [ ] **Alert System**
-  - [ ] Detection ranges
-  - [ ] Alert propagation to nearby enemies
-  - [ ] Stealth mechanics
-  - [ ] Alert level indicators
+- [x] **Alert System**
+  - [x] Detection ranges
+  - [x] Alert propagation to nearby enemies
+  - [x] Stealth mechanics
+  - [x] Alert level indicators
 
 - [ ] **Ambush Points**
   - [ ] Enemies hidden until player approaches
@@ -139,11 +139,11 @@
   - [ ] EMP for shields
   - [ ] Weapon switching UI
 
-- [ ] **Shield System**
-  - [ ] Regenerating shields
-  - [ ] Shield strength indicator
+- [x] **Shield System**
+  - [x] Regenerating shields
+  - [x] Shield strength indicator
   - [ ] Directional shields
-  - [ ] Shield overload effects
+  - [x] Shield overload effects
 
 - [ ] **Checkpoint System**
   - [ ] Save points on map
@@ -158,27 +158,27 @@
   - [ ] Unlock system
 
 ## 6. HUD Improvements
-- [ ] **Minimap**
-  - [ ] Terrain elevation display
-  - [ ] Enemy positions
-  - [ ] Objective markers
-  - [ ] Zoom levels
+- [x] **Minimap**
+  - [x] Terrain elevation display
+  - [x] Enemy positions
+  - [x] Objective markers
+  - [x] Zoom levels
 
-- [ ] **Altitude Indicator**
-  - [ ] Height above terrain
+- [x] **Altitude Indicator**
+  - [x] Height above terrain
   - [ ] Altitude warnings
   - [ ] Optimal altitude indicators
 
-- [ ] **Speed/Momentum Display**
-  - [ ] Velocity vector indicator
-  - [ ] Speed gauge
+- [x] **Speed/Momentum Display**
+  - [x] Velocity vector indicator
+  - [x] Speed gauge
   - [ ] G-force indicator
   - [ ] Stall warnings
 
-- [ ] **Objective Markers**
+- [x] **Objective Markers**
   - [ ] 3D markers in world
   - [ ] Distance indicators
-  - [ ] Off-screen indicators
+  - [x] Off-screen indicators
   - [ ] Priority system
 
 - [ ] **Threat Indicator**

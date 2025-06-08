@@ -36,6 +36,15 @@ pub enum MovementPattern {
     Drifting,   // Slow carrier movement
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum AlertState {
+    Unaware,     // Normal patrol behavior
+    Suspicious,  // Heard something, investigating
+    Alert,       // Saw player, engaging
+    Searching,   // Lost player, searching area
+    Returning,   // Returning to patrol
+}
+
 #[derive(Clone)]
 pub struct Enemy {
     pub pos: Vec3,
@@ -47,11 +56,22 @@ pub struct Enemy {
     pub spawn_point: Vec3,      // Remember where we spawned
     pub target_point: Vec3,     // Where we're moving to
     pub phase: f32,             // Animation phase for patterns
+    pub patrol_waypoints: Vec<Vec3>, // Waypoints for patrol pattern
+    pub current_waypoint: usize,     // Current waypoint index
     speed: f32,             // Base movement speed
     aggression: f32,        // How aggressive this enemy is (0-1)
     detection_range: f32,   // How far it can detect player
     attack_cooldown: f32,   // Time until next attack
     can_attack: bool,       // Whether this enemy type can attack
+    // Alert system fields
+    pub alert_state: AlertState,     // Current alert level
+    pub last_known_player_pos: Vec3, // Where we last saw the player
+    pub alert_cooldown: f32,         // Time until alert level decreases
+    pub search_timer: f32,           // How long we've been searching
+    pub investigation_point: Vec3,   // Where to investigate suspicious activity
+    pub communication_range: f32,    // How far this enemy can alert others
+    pub view_cone_angle: f32,        // Field of view in radians
+    pub hearing_range: f32,          // How far this enemy can hear
     laser_active: bool,     // Whether laser is currently firing
     laser_angle_h: f32,     // Current horizontal angle of laser sweep
     laser_angle_v: f32,     // Current vertical angle of laser sweep
@@ -124,43 +144,71 @@ impl Enemy {
             EnemyType::Vortex => MovementPattern::Stationary,
         };
         
-        // Set speed based on enemy type
+        // Set speed based on enemy type - MUCH faster for huge map
         let speed = match enemy_type {
-            EnemyType::Cube => rng.gen_range(80.0..120.0),
-            EnemyType::Pyramid => rng.gen_range(150.0..200.0),
-            EnemyType::Spinner => rng.gen_range(100.0..140.0),
-            EnemyType::Hunter => rng.gen_range(120.0..160.0),
-            EnemyType::Guardian => rng.gen_range(60.0..90.0),
-            EnemyType::Laser => rng.gen_range(40.0..60.0),
-            EnemyType::Swarm => rng.gen_range(200.0..250.0),
+            EnemyType::Cube => rng.gen_range(200.0..300.0),
+            EnemyType::Pyramid => rng.gen_range(350.0..450.0),
+            EnemyType::Spinner => rng.gen_range(250.0..350.0),
+            EnemyType::Hunter => rng.gen_range(300.0..400.0),
+            EnemyType::Guardian => rng.gen_range(150.0..250.0),
+            EnemyType::Laser => rng.gen_range(100.0..150.0),
+            EnemyType::Swarm => rng.gen_range(400.0..500.0),
             EnemyType::Phaser => 0.0, // Teleports instead, no speed needed
-            EnemyType::Shield => rng.gen_range(30.0..40.0),
-            EnemyType::Bomber => rng.gen_range(40.0..60.0),
-            EnemyType::Disruptor => rng.gen_range(50.0..70.0),
-            EnemyType::Carrier => rng.gen_range(20.0..30.0),
-            EnemyType::Reflector => rng.gen_range(70.0..90.0),
+            EnemyType::Shield => rng.gen_range(80.0..120.0),
+            EnemyType::Bomber => rng.gen_range(120.0..180.0),
+            EnemyType::Disruptor => rng.gen_range(150.0..200.0),
+            EnemyType::Carrier => rng.gen_range(60.0..100.0),
+            EnemyType::Reflector => rng.gen_range(180.0..250.0),
             EnemyType::Vortex => 0.0, // Stationary, no speed needed
         };
         
-        // Set aggression and detection range
-        let (aggression, detection_range) = match enemy_type {
-            EnemyType::Cube => (0.3, 500.0),
-            EnemyType::Pyramid => (0.7, 800.0),
-            EnemyType::Spinner => (0.5, 600.0),
-            EnemyType::Hunter => (0.9, 1200.0),
-            EnemyType::Guardian => (0.4, 400.0),
-            EnemyType::Laser => (0.6, 1000.0),
-            EnemyType::Swarm => (0.8, 400.0),
-            EnemyType::Phaser => (0.7, 1500.0),
-            EnemyType::Shield => (0.2, 600.0),
-            EnemyType::Bomber => (0.4, 700.0),
-            EnemyType::Disruptor => (0.5, 800.0),
-            EnemyType::Carrier => (0.3, 1000.0),
-            EnemyType::Reflector => (0.6, 600.0),
-            EnemyType::Vortex => (0.0, 500.0),
+        // Set aggression, detection range, and alert parameters - MUCH more aggressive for huge map
+        let (aggression, detection_range, view_angle, hearing_range, comm_range) = match enemy_type {
+            EnemyType::Cube => (0.5, 1500.0, PI * 0.7, 800.0, 1200.0),
+            EnemyType::Pyramid => (0.8, 2500.0, PI * 0.6, 1200.0, 1800.0),
+            EnemyType::Spinner => (0.6, 2000.0, PI * 0.8, 1000.0, 1500.0),
+            EnemyType::Hunter => (0.95, 4000.0, PI * 0.5, 2000.0, 2500.0), // Hunters are terrifying
+            EnemyType::Guardian => (0.6, 1800.0, PI * 0.9, 1500.0, 2000.0),
+            EnemyType::Laser => (0.7, 3000.0, PI * 0.4, 1500.0, 2000.0),
+            EnemyType::Swarm => (0.9, 1200.0, PI, 800.0, 3000.0), // Swarms communicate very well
+            EnemyType::Phaser => (0.8, 5000.0, PI * 0.4, 1800.0, 1500.0), // Long range snipers
+            EnemyType::Shield => (0.3, 2000.0, PI * 1.5, 1200.0, 2500.0), // Wide vision
+            EnemyType::Bomber => (0.5, 2200.0, PI * 0.7, 1000.0, 1500.0),
+            EnemyType::Disruptor => (0.6, 2500.0, PI * 0.8, 1400.0, 1800.0),
+            EnemyType::Carrier => (0.4, 3000.0, PI * 0.9, 1500.0, 3000.0),
+            EnemyType::Reflector => (0.7, 2000.0, PI * 0.6, 1200.0, 1500.0),
+            EnemyType::Vortex => (0.0, 1500.0, PI * 2.0, 2000.0, 2500.0), // 360 degree awareness
         };
         
         let spawn_point = Vec3::new(x, spawn_height, z);
+        
+        // Generate patrol waypoints - all enemies patrol now, not just Guardians
+        let patrol_waypoints = {
+            let mut waypoints = Vec::new();
+            let patrol_radius = match enemy_type {
+                EnemyType::Guardian => 2000.0,
+                EnemyType::Hunter => 3000.0,
+                EnemyType::Swarm => 1500.0,
+                EnemyType::Phaser => 4000.0, // Snipers patrol large areas
+                _ => 1000.0,
+            };
+            
+            let waypoint_count = match enemy_type {
+                EnemyType::Guardian => 6,
+                EnemyType::Hunter => 8,
+                _ => 4,
+            };
+            
+            for i in 0..waypoint_count {
+                let angle = i as f32 * PI * 2.0 / waypoint_count as f32 + rng.gen_range(-0.3..0.3);
+                let radius_variation = patrol_radius * rng.gen_range(0.7..1.3);
+                let wx = x + angle.cos() * radius_variation;
+                let wz = z + angle.sin() * radius_variation;
+                let wy = terrain_height_at(wx, wz) + rng.gen_range(50.0..200.0);
+                waypoints.push(Vec3::new(wx, wy, wz));
+            }
+            waypoints
+        };
         
         Self {
             pos: spawn_point,
@@ -176,11 +224,22 @@ impl Enemy {
             spawn_point,
             target_point: spawn_point,
             phase: rng.gen_range(0.0..PI * 2.0),
+            patrol_waypoints,
+            current_waypoint: 0,
             speed,
             aggression: aggression + rng.gen_range(-0.1..0.1),
             detection_range,
             attack_cooldown: 0.0,
             can_attack: matches!(enemy_type, EnemyType::Pyramid | EnemyType::Hunter | EnemyType::Guardian),
+            // Initialize alert system
+            alert_state: AlertState::Unaware,
+            last_known_player_pos: spawn_point,
+            alert_cooldown: 0.0,
+            search_timer: 0.0,
+            investigation_point: spawn_point,
+            communication_range: comm_range,
+            view_cone_angle: view_angle,
+            hearing_range,
             laser_active: false,
             laser_angle_h: 0.0,
             laser_angle_v: 0.0,
@@ -212,6 +271,14 @@ impl Enemy {
         enemy.movement_pattern = pattern;
         enemy
     }
+    
+    pub fn new_with_patrol(x: f32, z: f32, enemy_type: EnemyType, waypoints: Vec<Vec3>) -> Self {
+        let mut enemy = Self::new(x, z, enemy_type);
+        enemy.movement_pattern = MovementPattern::Patrol;
+        enemy.patrol_waypoints = waypoints;
+        enemy.current_waypoint = 0;
+        enemy
+    }
 
     pub fn update(&mut self, dt: f32) {
         self.rotation += self.rotation_speed * dt;
@@ -223,6 +290,9 @@ impl Enemy {
         if self.phase > 1000.0 {
             self.phase = self.phase % (2.0 * PI);
         }
+        
+        // Update alert system first
+        self.update_alert_state(player_pos, dt);
         
         // Special handling for enemies with unique behaviors
         match self.enemy_type {
@@ -251,8 +321,16 @@ impl Enemy {
         let to_player = player_pos - self.pos;
         let distance_to_player = to_player.length();
         
+        // Override movement pattern based on alert state
+        let effective_pattern = match self.alert_state {
+            AlertState::Alert => MovementPattern::Tracking,
+            AlertState::Searching => MovementPattern::Hover, // Will move to search point
+            AlertState::Suspicious => MovementPattern::Hover, // Will investigate
+            _ => self.movement_pattern,
+        };
+        
         // Update based on movement pattern
-        match self.movement_pattern {
+        match effective_pattern {
             MovementPattern::Hover => {
                 // Maintain altitude above terrain
                 let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
@@ -262,9 +340,34 @@ impl Enemy {
                 let height_diff = hover_height - self.pos.y;
                 self.vel.y = height_diff * 2.0;
                 
-                // Gentle wandering
-                self.vel.x = (self.phase * 0.3).sin() * self.speed * 0.5;
-                self.vel.z = (self.phase * 0.25 + 1.0).cos() * self.speed * 0.5;
+                // Movement based on alert state
+                match self.alert_state {
+                    AlertState::Searching => {
+                        // Move towards last known player position
+                        let to_search = self.last_known_player_pos - self.pos;
+                        let horizontal = Vec3::new(to_search.x, 0.0, to_search.z).normalize_or_zero();
+                        self.vel.x = horizontal.x * self.speed * 1.2; // Search faster
+                        self.vel.z = horizontal.z * self.speed * 1.2;
+                    }
+                    AlertState::Suspicious => {
+                        // Move towards investigation point
+                        let to_investigate = self.investigation_point - self.pos;
+                        let horizontal = Vec3::new(to_investigate.x, 0.0, to_investigate.z).normalize_or_zero();
+                        self.vel.x = horizontal.x * self.speed; // Investigate at full speed
+                        self.vel.z = horizontal.z * self.speed;
+                    }
+                    _ => {
+                        // Active patrolling even when unaware
+                        let wander_speed = self.speed * 0.8; // Much faster wandering
+                        self.vel.x = (self.phase * 0.3).sin() * wander_speed;
+                        self.vel.z = (self.phase * 0.25 + 1.0).cos() * wander_speed;
+                        
+                        // Add some forward momentum
+                        let forward_angle = self.phase * 0.1;
+                        self.vel.x += forward_angle.cos() * self.speed * 0.3;
+                        self.vel.z += forward_angle.sin() * self.speed * 0.3;
+                    }
+                }
             },
             
             MovementPattern::Sinusoidal => {
@@ -324,14 +427,30 @@ impl Enemy {
             },
             
             MovementPattern::Tracking => {
-                // Hunt the player
-                if distance_to_player < self.detection_range {
+                // Use last known position if in alert state
+                let target_pos = if self.alert_state == AlertState::Alert {
+                    player_pos
+                } else {
+                    self.last_known_player_pos
+                };
+                
+                let to_target = target_pos - self.pos;
+                let distance_to_target = to_target.length();
+                
+                // Hunt the target
+                if distance_to_target > 50.0 {
                     // Lead the target
-                    let _lead_time = distance_to_player / self.speed * 0.5;
-                    let predicted_pos = player_pos; // Could add player velocity prediction here
+                    let _lead_time = distance_to_target / self.speed * 0.5;
+                    let predicted_pos = target_pos; // Could add player velocity prediction here
                     
-                    let to_target = predicted_pos - self.pos;
-                    self.vel = to_target.normalize_or_zero() * self.speed * self.aggression;
+                    let to_pred_target = predicted_pos - self.pos;
+                    // Speed increases with alert level
+                    let speed_mult = match self.alert_state {
+                        AlertState::Alert => 1.2,
+                        AlertState::Searching => 0.9,
+                        _ => 0.7,
+                    };
+                    self.vel = to_pred_target.normalize_or_zero() * self.speed * self.aggression * speed_mult;
                     
                     // Maintain some altitude
                     let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
@@ -339,17 +458,9 @@ impl Enemy {
                         self.vel.y = (self.vel.y + 50.0).max(0.0);
                     }
                 } else {
-                    // Search pattern when player not detected
-                    let search_radius = 300.0;
-                    let angle = self.phase * 0.3;
-                    self.target_point = self.spawn_point + Vec3::new(
-                        angle.cos() * search_radius,
-                        0.0,
-                        angle.sin() * search_radius
-                    );
-                    
-                    let to_target = self.target_point - self.pos;
-                    self.vel = to_target.normalize_or_zero() * self.speed * 0.5;
+                    // Circle when too close
+                    let tangent = Vec3::new(-to_target.z, 0.0, to_target.x).normalize_or_zero();
+                    self.vel = tangent * self.speed * 0.8;
                 }
             },
             
@@ -420,32 +531,41 @@ impl Enemy {
             },
             
             MovementPattern::Patrol => {
-                // Move between patrol points
-                let patrol_radius = 400.0;
-                let num_points = 4;
-                let current_point = ((self.phase * 0.1) as i32 % num_points) as f32;
-                let angle = current_point * (2.0 * PI / num_points as f32);
-                
-                self.target_point = self.spawn_point + Vec3::new(
-                    angle.cos() * patrol_radius,
-                    0.0,
-                    angle.sin() * patrol_radius
-                );
-                
-                let to_target = self.target_point - self.pos;
-                if to_target.length() > 50.0 {
-                    self.vel = to_target.normalize_or_zero() * self.speed;
+                // Use waypoint system for patrol
+                if !self.patrol_waypoints.is_empty() {
+                    // Get current target waypoint
+                    let target_waypoint = self.patrol_waypoints[self.current_waypoint];
+                    let to_target = target_waypoint - self.pos;
+                    let distance_to_waypoint = to_target.length();
                     
-                    // Maintain altitude
-                    let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
-                    let patrol_height = terrain_height + 60.0;
-                    self.vel.y = (patrol_height - self.pos.y).clamp(-self.speed * 0.5, self.speed * 0.5);
-                }
-                
-                // React to player if nearby
-                if distance_to_player < self.detection_range * 0.5 {
-                    let reaction = to_player.normalize_or_zero() * self.speed * self.aggression * 0.5;
-                    self.vel += reaction;
+                    // Check if we've reached the waypoint
+                    if distance_to_waypoint < 30.0 {
+                        // Move to next waypoint
+                        self.current_waypoint = (self.current_waypoint + 1) % self.patrol_waypoints.len();
+                    }
+                    
+                    // Move towards current waypoint
+                    if distance_to_waypoint > 5.0 {
+                        self.vel = to_target.normalize_or_zero() * self.speed * 1.5; // Faster patrol
+                    }
+                    
+                    // React to player if detected
+                    if distance_to_player < self.detection_range {
+                        // Break patrol to pursue player
+                        let pursuit_strength = if distance_to_player < 200.0 { 1.0 } else { 0.5 };
+                        let pursuit_vel = to_player.normalize_or_zero() * self.speed * self.aggression * pursuit_strength;
+                        self.vel = self.vel * 0.5 + pursuit_vel * 0.5; // Blend patrol and pursuit
+                    }
+                } else {
+                    // Fallback if no waypoints - simple circular patrol
+                    let angle = self.phase * 0.1;
+                    self.target_point = self.spawn_point + Vec3::new(
+                        angle.cos() * 300.0,
+                        0.0,
+                        angle.sin() * 300.0
+                    );
+                    let to_target = self.target_point - self.pos;
+                    self.vel = to_target.normalize_or_zero() * self.speed * 0.7;
                 }
             },
         }
@@ -467,22 +587,22 @@ impl Enemy {
             self.vel.y = self.vel.y.max(0.0);
         }
         
-        // Check if we should attack
-        if self.can_attack && self.attack_cooldown <= 0.0 && distance_to_player < self.detection_range {
+        // Check if we should attack - only when alert
+        if self.alert_state == AlertState::Alert && self.can_attack && self.attack_cooldown <= 0.0 {
             let attack_chance = match self.enemy_type {
-                EnemyType::Pyramid => 0.02,    // Fast shooters
-                EnemyType::Hunter => 0.03,     // Aggressive shooters
-                EnemyType::Guardian => 0.015,  // Defensive shooters
+                EnemyType::Pyramid => 0.04,    // Fast shooters - doubled
+                EnemyType::Hunter => 0.06,     // Aggressive shooters - doubled
+                EnemyType::Guardian => 0.03,   // Defensive shooters - doubled
                 _ => 0.0,
             };
             
             if rand::random::<f32>() < attack_chance * self.aggression {
-                // Set cooldown based on enemy type
+                // Set cooldown based on enemy type - much faster fire rates
                 self.attack_cooldown = match self.enemy_type {
-                    EnemyType::Pyramid => 1.5,
-                    EnemyType::Hunter => 1.0,
-                    EnemyType::Guardian => 2.0,
-                    _ => 2.0,
+                    EnemyType::Pyramid => 0.75,
+                    EnemyType::Hunter => 0.5,
+                    EnemyType::Guardian => 1.0,
+                    _ => 1.0,
                 };
                 
                 // Return bullet spawn direction towards player
@@ -658,8 +778,8 @@ impl Enemy {
                 println!("Laser deactivated after {} seconds", self.laser_duration);
             }
         } else if distance_to_player < self.detection_range && self.attack_cooldown <= 0.0 {
-            // Start a new laser attack with higher chance
-            if rand::random::<f32>() < 0.05 * self.aggression { // Increased from 0.02
+            // Start a new laser attack with much higher chance
+            if rand::random::<f32>() < 0.1 * self.aggression { // Doubled from 0.05
                 self.laser_active = true;
                 self.laser_duration = 0.0;
                 
@@ -755,6 +875,155 @@ impl Enemy {
             self.vortex_strength
         } else {
             0.0
+        }
+    }
+    
+    pub fn set_patrol_route(&mut self, waypoints: Vec<Vec3>) {
+        self.movement_pattern = MovementPattern::Patrol;
+        self.patrol_waypoints = waypoints;
+        self.current_waypoint = 0;
+    }
+    
+    fn update_alert_state(&mut self, player_pos: Vec3, dt: f32) {
+        let to_player = player_pos - self.pos;
+        let distance = to_player.length();
+        
+        // Update alert cooldown
+        if self.alert_cooldown > 0.0 {
+            self.alert_cooldown -= dt;
+        }
+        
+        match self.alert_state {
+            AlertState::Unaware => {
+                // Check if we can see the player
+                if self.can_see_player(player_pos, distance) {
+                    self.alert_state = AlertState::Alert;
+                    self.last_known_player_pos = player_pos;
+                    self.alert_cooldown = 10.0; // Stay alert much longer
+                    println!("Enemy {:?} spotted player!", self.enemy_type);
+                } else if self.can_hear_player(distance) {
+                    // Heard something suspicious
+                    self.alert_state = AlertState::Suspicious;
+                    self.investigation_point = player_pos;
+                    self.alert_cooldown = 3.0;
+                }
+            }
+            
+            AlertState::Suspicious => {
+                // Investigating suspicious noise
+                let dist_to_investigate = (self.investigation_point - self.pos).length();
+                
+                if self.can_see_player(player_pos, distance) {
+                    // Found the player!
+                    self.alert_state = AlertState::Alert;
+                    self.last_known_player_pos = player_pos;
+                    self.alert_cooldown = 10.0; // Stay alert much longer
+                } else if dist_to_investigate < 50.0 || self.alert_cooldown <= 0.0 {
+                    // Reached investigation point or gave up
+                    self.alert_state = AlertState::Returning;
+                    self.alert_cooldown = 2.0;
+                }
+            }
+            
+            AlertState::Alert => {
+                // Actively engaging player
+                if self.can_see_player(player_pos, distance) {
+                    // Update last known position
+                    self.last_known_player_pos = player_pos;
+                    self.alert_cooldown = 5.0;
+                } else if self.alert_cooldown <= 0.0 {
+                    // Lost sight of player
+                    self.alert_state = AlertState::Searching;
+                    self.search_timer = 0.0;
+                }
+            }
+            
+            AlertState::Searching => {
+                // Looking for lost player
+                self.search_timer += dt;
+                
+                if self.can_see_player(player_pos, distance) {
+                    // Found player again!
+                    self.alert_state = AlertState::Alert;
+                    self.last_known_player_pos = player_pos;
+                    self.alert_cooldown = 10.0; // Stay alert much longer
+                    self.search_timer = 0.0;
+                } else if self.search_timer > 30.0 { // Search for much longer
+                    // Give up searching
+                    self.alert_state = AlertState::Returning;
+                    self.alert_cooldown = 2.0;
+                }
+            }
+            
+            AlertState::Returning => {
+                // Going back to patrol
+                let dist_to_spawn = (self.spawn_point - self.pos).length();
+                
+                if self.can_see_player(player_pos, distance) {
+                    // Spotted player again!
+                    self.alert_state = AlertState::Alert;
+                    self.last_known_player_pos = player_pos;
+                    self.alert_cooldown = 10.0; // Stay alert much longer
+                } else if dist_to_spawn < 100.0 || self.alert_cooldown <= 0.0 {
+                    // Returned to patrol
+                    self.alert_state = AlertState::Unaware;
+                }
+            }
+        }
+    }
+    
+    fn can_see_player(&self, player_pos: Vec3, distance: f32) -> bool {
+        // Check distance first
+        if distance > self.detection_range {
+            return false;
+        }
+        
+        // Check if player is within view cone
+        let to_player = (player_pos - self.pos).normalize_or_zero();
+        if to_player.length() == 0.0 {
+            return false;
+        }
+        
+        // Get enemy's forward direction based on velocity or rotation
+        let forward = if self.vel.length() > 0.1 {
+            self.vel.normalize()
+        } else {
+            // Use rotation for stationary enemies
+            Vec3::new(-self.rotation.y.sin(), 0.0, -self.rotation.y.cos())
+        };
+        
+        // Calculate angle between forward direction and player direction
+        let dot = forward.dot(to_player);
+        let angle = dot.acos();
+        
+        // Check if within view cone
+        angle <= self.view_cone_angle / 2.0
+    }
+    
+    fn can_hear_player(&self, distance: f32) -> bool {
+        // Simple hearing check - could be enhanced with player speed/actions
+        distance <= self.hearing_range
+    }
+    
+    pub fn alert_nearby_enemies(&self, all_enemies: &mut [Enemy]) {
+        // Called when this enemy spots the player
+        if self.alert_state != AlertState::Alert {
+            return;
+        }
+        
+        for other in all_enemies.iter_mut() {
+            // Don't alert ourselves
+            if std::ptr::eq(self, other) {
+                continue;
+            }
+            
+            let distance = (other.pos - self.pos).length();
+            if distance <= self.communication_range && other.alert_state == AlertState::Unaware {
+                // Alert the other enemy
+                other.alert_state = AlertState::Suspicious;
+                other.investigation_point = self.last_known_player_pos;
+                other.alert_cooldown = 3.0;
+            }
         }
     }
 }

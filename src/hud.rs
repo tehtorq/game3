@@ -12,7 +12,7 @@ impl HUD {
     pub fn new() -> Self {
         Self {
             minimap_size: 150.0,  // Size of minimap in pixels
-            minimap_range: 3000.0, // Start more zoomed out
+            minimap_range: 15000.0, // Even more zoomed out for aggressive enemies
         }
     }
     
@@ -21,7 +21,7 @@ impl HUD {
     }
     
     pub fn zoom_out(&mut self) {
-        self.minimap_range = (self.minimap_range * 1.33).min(10000.0);
+        self.minimap_range = (self.minimap_range * 1.33).min(50000.0); // Allow zooming out to see entire map
     }
     
     pub fn draw(&self, renderer: &mut Renderer, game: &Game, screen_width: f32, screen_height: f32) {
@@ -46,6 +46,14 @@ impl HUD {
         let fuel_text = format!("FUEL: {}%", fuel_percent);
         self.draw_text(renderer, &fuel_text, 20.0, screen_height - 100.0);
         
+        // Shield indicator (bottom left, below fuel)
+        let shield_percent = (player.shield * 100.0) as i32;
+        let shield_text = format!("SHIELD: {}%", shield_percent);
+        self.draw_text(renderer, &shield_text, 20.0, screen_height - 120.0);
+        
+        // Draw shield bar
+        self.draw_shield_bar(renderer, player, 20.0, screen_height - 140.0);
+        
         // Brake indicator (center bottom)
         if player.braking {
             self.draw_text(renderer, "BRAKING", screen_width / 2.0 - 40.0, screen_height - 40.0);
@@ -61,7 +69,7 @@ impl HUD {
         self.draw_offscreen_indicators(renderer, game, screen_width, screen_height);
     }
     
-    fn draw_text(&self, renderer: &mut Renderer, text: &str, x: f32, y: f32) {
+    fn draw_text(&self, renderer: &mut Renderer, text: &str, _x: f32, y: f32) {
         // For orthographic projection, use simpler coordinates
         let world_x = -35.0;
         let world_y = -35.0 + (600.0 - y) / 15.0; // Bottom-left origin
@@ -176,6 +184,71 @@ impl HUD {
         renderer.draw_line(player_map_pos + front, player_map_pos + left);
         renderer.draw_line(player_map_pos + left, player_map_pos + right);
         renderer.draw_line(player_map_pos + right, player_map_pos + front);
+        
+        // Draw bases on minimap
+        for base in &game.bases {
+            if base.is_active {
+                let relative_pos = base.pos - game.player.pos;
+                let distance = relative_pos.length();
+                
+                // Always show bases on minimap (they're important landmarks)
+                if distance < self.minimap_range * 2.0 {
+                    // Transform to view space
+                    let sin_a = game.player.rotation.sin();
+                    let cos_a = game.player.rotation.cos();
+                    
+                    let view_right = relative_pos.x * (-cos_a) + relative_pos.z * sin_a;
+                    let view_forward = relative_pos.x * sin_a + relative_pos.z * cos_a;
+                    
+                    // Scale position to minimap
+                    let scale = half_size / self.minimap_range;
+                    let base_x = map_center_x + view_right * scale;
+                    let base_y = map_center_y - view_forward * scale;
+                    
+                    // Clamp to minimap bounds
+                    let base_x = base_x.clamp(map_center_x - half_size, map_center_x + half_size);
+                    let base_y = base_y.clamp(map_center_y - half_size, map_center_y + half_size);
+                    
+                    let base_map_pos = Vec3::new(base_x, base_y, z);
+                    
+                    // Draw base as square with size based on type
+                    let base_size = match base.base_type {
+                        crate::base::BaseType::Small => 0.3,
+                        crate::base::BaseType::Medium => 0.4,
+                        crate::base::BaseType::Large => 0.5,
+                        crate::base::BaseType::Fortress => 0.6,
+                    };
+                    
+                    // Draw square outline
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(-base_size, -base_size, 0.0),
+                        base_map_pos + Vec3::new(base_size, -base_size, 0.0)
+                    );
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(base_size, -base_size, 0.0),
+                        base_map_pos + Vec3::new(base_size, base_size, 0.0)
+                    );
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(base_size, base_size, 0.0),
+                        base_map_pos + Vec3::new(-base_size, base_size, 0.0)
+                    );
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(-base_size, base_size, 0.0),
+                        base_map_pos + Vec3::new(-base_size, -base_size, 0.0)
+                    );
+                    
+                    // Draw center cross to indicate it's a base
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(-base_size * 0.5, 0.0, 0.0),
+                        base_map_pos + Vec3::new(base_size * 0.5, 0.0, 0.0)
+                    );
+                    renderer.draw_line(
+                        base_map_pos + Vec3::new(0.0, -base_size * 0.5, 0.0),
+                        base_map_pos + Vec3::new(0.0, base_size * 0.5, 0.0)
+                    );
+                }
+            }
+        }
         
         // Draw enemies on minimap
         for enemy in &game.enemies {
@@ -368,6 +441,56 @@ impl HUD {
                     }
                 }
             }
+        }
+    }
+    
+    fn draw_shield_bar(&self, renderer: &mut Renderer, player: &Player, x: f32, y: f32) {
+        // Draw shield strength as a horizontal bar
+        let world_x = -35.0 + (x / 100.0);
+        let world_y = 25.0 - (y / 100.0);
+        let z = -1.0;
+        
+        let bar_width = 5.0;
+        let bar_height = 0.3;
+        
+        // Draw bar outline
+        renderer.draw_line(
+            Vec3::new(world_x, world_y, z),
+            Vec3::new(world_x + bar_width, world_y, z)
+        );
+        renderer.draw_line(
+            Vec3::new(world_x, world_y - bar_height, z),
+            Vec3::new(world_x + bar_width, world_y - bar_height, z)
+        );
+        renderer.draw_line(
+            Vec3::new(world_x, world_y, z),
+            Vec3::new(world_x, world_y - bar_height, z)
+        );
+        renderer.draw_line(
+            Vec3::new(world_x + bar_width, world_y, z),
+            Vec3::new(world_x + bar_width, world_y - bar_height, z)
+        );
+        
+        // Draw filled portion based on shield strength
+        let fill_width = bar_width * player.shield;
+        if fill_width > 0.1 {
+            // Draw several horizontal lines to fill the bar
+            for i in 1..4 {
+                let offset = i as f32 * bar_height / 4.0;
+                renderer.draw_line(
+                    Vec3::new(world_x, world_y - offset, z),
+                    Vec3::new(world_x + fill_width, world_y - offset, z)
+                );
+            }
+        }
+        
+        // If shield is recharging, draw a pulsing indicator
+        if player.shield_recharge_timer > 0.0 {
+            let pulse = (player.shield_recharge_timer * 3.0).sin().abs();
+            renderer.draw_line(
+                Vec3::new(world_x - 0.2, world_y - bar_height * 0.5, z),
+                Vec3::new(world_x - 0.2 - pulse * 0.3, world_y - bar_height * 0.5, z)
+            );
         }
     }
 }

@@ -45,6 +45,8 @@ pub struct Player {
     pub pitch: f32,
     pub afterburner_fuel: f32, // 0.0 to 1.0
     pub braking: bool,         // Air brake active
+    pub shield: f32,           // Shield strength 0.0 to 1.0
+    pub shield_recharge_timer: f32, // Time until shield starts recharging
 }
 
 impl Player {
@@ -59,6 +61,8 @@ impl Player {
             pitch: 0.0,
             afterburner_fuel: 1.0,
             braking: false,
+            shield: 1.0,
+            shield_recharge_timer: 0.0,
         }
     }
 
@@ -70,14 +74,14 @@ impl Player {
         
         const THRUST_POWER: f32 = 1200.0;   // More than doubled for snappier acceleration
         const VERTICAL_THRUST: f32 = 600.0;  // Doubled for better vertical control
-        const AFTERBURNER_MULTIPLIER: f32 = 2.5;  // More powerful boost
+        const AFTERBURNER_MULTIPLIER: f32 = 3.0;  // Even more powerful to escape aggressive enemies
         const AFTERBURNER_DRAIN: f32 = 0.33; // 3 seconds of fuel
         const AFTERBURNER_REGEN: f32 = 0.15; // Faster regen (6.7 seconds to refill)
         
         const AIR_DRAG: f32 = 1.5;          // Much higher drag for tighter control
         const BRAKE_DRAG: f32 = 4.0;        // Stronger brakes
         const GRAVITY: f32 = 80.0;          // Slightly stronger gravity
-        const MAX_SPEED: f32 = 600.0;       // Reduced for tighter gameplay
+        const MAX_SPEED: f32 = 800.0;       // Increased to outrun aggressive enemies
         const MAX_VERTICAL_SPEED: f32 = 300.0;  // Reduced to match
         
         // Handle rotation with acceleration
@@ -165,6 +169,15 @@ impl Player {
             self.pos.y = MAX_ALTITUDE;
             self.vel.y = self.vel.y.min(0.0);
         }
+        
+        // Update shield recharge
+        if self.shield_recharge_timer > 0.0 {
+            self.shield_recharge_timer -= dt;
+        } else if self.shield < 1.0 {
+            // Recharge shield when timer expires
+            const SHIELD_RECHARGE_RATE: f32 = 0.2; // 20% per second
+            self.shield = (self.shield + SHIELD_RECHARGE_RATE * dt).min(1.0);
+        }
     }
     
     pub fn get_speed(&self) -> f32 {
@@ -181,6 +194,17 @@ impl Player {
     
     pub fn get_height_above_terrain(&self) -> f32 {
         self.pos.y - self.get_terrain_height()
+    }
+    
+    pub fn take_damage(&mut self, amount: f32) -> bool {
+        // Returns true if player was damaged (not blocked by shield)
+        if self.shield > 0.0 {
+            self.shield = (self.shield - amount).max(0.0);
+            self.shield_recharge_timer = 3.0; // 3 seconds before shield starts recharging
+            false // Shield absorbed the damage
+        } else {
+            true // No shield, player takes damage
+        }
     }
 }
 

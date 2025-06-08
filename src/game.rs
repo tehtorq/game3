@@ -36,6 +36,7 @@ fn terrain_height_at(x: f32, z: f32) -> f32 {
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::Particle;
 use crate::renderer::Renderer;
+use crate::base::{Base, BaseType};
 use glam::Vec3;
 
 pub struct Game {
@@ -44,6 +45,7 @@ pub struct Game {
     pub bullets: Vec<Bullet>,
     pub particles: Vec<Particle>,
     pub mines: Vec<Mine>,
+    pub bases: Vec<Base>,
     pub enemy_spawn_timer: f32,
     pub shoot_cooldown: f32,
     pub wave: u32,
@@ -61,6 +63,7 @@ impl Game {
             bullets: Vec::new(),
             particles: Vec::new(),
             mines: Vec::new(),
+            bases: Vec::new(),
             enemy_spawn_timer: 3.0,  // Start with 3 second delay before first wave
             shoot_cooldown: 0.0,
             wave: 1,
@@ -70,7 +73,8 @@ impl Game {
             player_slow_timer: 0.0,
         };
         
-        game.spawn_wave();
+        // Generate initial bases around the map
+        game.generate_bases();
         
         game
     }
@@ -94,17 +98,57 @@ impl Game {
         if shoot && self.shoot_cooldown <= 0.0 {
             self.bullets.push(Bullet::new(&self.player));
             self.shoot_cooldown = 0.15;
+            
+            // Alert nearby enemies to gunfire
+            self.alert_enemies_to_sound(self.player.pos, 1500.0); // Gunshots are VERY loud on huge map
         }
         self.shoot_cooldown -= dt;
+        
+        // Update bases first
+        let mut base_bullets = Vec::new();
+        let mut bases_to_spawn = Vec::new();
+        
+        for (i, base) in self.bases.iter_mut().enumerate() {
+            let turret_shots = base.update(self.player.pos, dt);
+            base_bullets.extend(turret_shots);
+            
+            // Check if base should spawn enemies
+            if base.should_spawn() {
+                bases_to_spawn.push(i);
+                base.reset_spawn_timer();
+            }
+        }
+        
+        // Spawn enemies from bases that are ready
+        for base_index in bases_to_spawn {
+            let base_pos = self.bases[base_index].pos;
+            let enemy_types = self.bases[base_index].get_spawn_types();
+            let routes = self.bases[base_index].get_patrol_routes();
+            
+            self.spawn_enemies_from_base_data(base_pos, enemy_types, routes);
+        }
+        
+        // Create bullets from base turrets
+        for (pos, dir) in base_bullets {
+            let mut bullet = Bullet::new_at_position(pos, dir, BulletType::Enemy);
+            bullet.vel = dir * 400.0; // Turret bullets
+            self.bullets.push(bullet);
+        }
         
         // Update enemies with player awareness and handle attacks
         let mut enemy_bullets = Vec::new();
         let mut new_mines = Vec::new();
         let mut new_swarms = Vec::new();
+        let mut alerted_enemies = Vec::new();
         
-        for enemy in &mut self.enemies {
+        for (i, enemy) in self.enemies.iter_mut().enumerate() {
             if let Some(attack_dir) = enemy.update_with_player(self.player.pos, dt) {
                 enemy_bullets.push(Bullet::new_enemy(enemy, attack_dir));
+            }
+            
+            // Track which enemies just became alerted
+            if enemy.alert_state == crate::enemy::AlertState::Alert && enemy.alert_cooldown >= 4.9 {
+                alerted_enemies.push(i);
             }
             
             // Handle special abilities
@@ -153,12 +197,25 @@ impl Game {
         self.mines.extend(new_mines);
         self.enemies.extend(new_swarms);
         
+        // Alert propagation - enemies that spotted the player alert nearby allies
+        for alert_idx in alerted_enemies {
+            // Get a raw pointer to the enemies slice to avoid borrowing issues
+            let enemies_ptr = self.enemies.as_mut_ptr();
+            let enemies_len = self.enemies.len();
+            
+            unsafe {
+                let alerting_enemy = &(*enemies_ptr.add(alert_idx));
+                let enemies_slice = std::slice::from_raw_parts_mut(enemies_ptr, enemies_len);
+                alerting_enemy.alert_nearby_enemies(enemies_slice);
+            }
+        }
+        
         // Remove enemies that are too far away or behind
         let player_z = self.player.pos.z;
         self.enemies.retain(|e| {
             let distance = (e.pos - self.player.pos).length();
-            // Keep enemies within 5000 units and don't remove them if they're still ahead
-            distance < 5000.0 && (e.pos.z < player_z || e.pos.z > player_z - 2000.0)
+            // Keep enemies within 10000 units to allow longer pursuits
+            distance < 10000.0 && (e.pos.z < player_z || e.pos.z > player_z - 4000.0)
         });
         
         // Update bullets and check terrain collisions
@@ -206,14 +263,14 @@ impl Game {
         // Check collisions
         self.check_collisions();
         
-        // Spawn new enemies with longer intervals
+        // Wave progression - add more bases as waves increase
         self.enemy_spawn_timer -= dt;
         if self.enemy_spawn_timer <= 0.0 {
             self.wave += 1;  // Increment wave counter
-            println!("Spawning wave {}", self.wave);
-            self.spawn_wave();
-            // Spawn intervals: 8-15 seconds
-            self.enemy_spawn_timer = (15.0 - (self.wave as f32 * 0.5)).max(8.0);
+            println!("Wave {} - Adding new bases", self.wave);
+            self.add_wave_bases();
+            // Spawn intervals: 30-60 seconds between new bases
+            self.enemy_spawn_timer = (40.0 - (self.wave as f32 * 2.0)).max(20.0); // Much faster base spawning
         }
     }
 
@@ -222,40 +279,10 @@ impl Game {
     }
 
 
+    // Legacy spawn_wave function - no longer used, enemies spawn from bases now
+    /*
     fn spawn_wave(&mut self) {
-        let mut rng = thread_rng();
-        
-        // Wave composition changes based on wave number
-        let wave_templates = [
-            // Wave 1-2: Basic enemies
-            vec![(EnemyType::Cube, 5), (EnemyType::Pyramid, 2)],
-            // Wave 3-4: Add swarms and spinners
-            vec![(EnemyType::Cube, 3), (EnemyType::Pyramid, 2), (EnemyType::Spinner, 2), (EnemyType::Swarm, 8)],
-            // Wave 5-6: Add support enemies
-            vec![(EnemyType::Pyramid, 2), (EnemyType::Spinner, 2), (EnemyType::Shield, 1), (EnemyType::Disruptor, 1), (EnemyType::Swarm, 6)],
-            // Wave 7-8: Add dangerous enemies
-            vec![(EnemyType::Hunter, 2), (EnemyType::Laser, 1), (EnemyType::Bomber, 2), (EnemyType::Phaser, 1), (EnemyType::Shield, 1)],
-            // Wave 9-10: Add advanced enemies
-            vec![(EnemyType::Guardian, 2), (EnemyType::Reflector, 2), (EnemyType::Vortex, 1), (EnemyType::Bomber, 1), (EnemyType::Hunter, 1)],
-            // Wave 11+: Ultimate challenge
-            vec![(EnemyType::Carrier, 1), (EnemyType::Laser, 2), (EnemyType::Phaser, 2), (EnemyType::Vortex, 1), (EnemyType::Shield, 2), (EnemyType::Reflector, 1)],
-        ];
-        
-        let template_index = ((self.wave - 1) / 2).min(5) as usize;
-        let template = &wave_templates[template_index];
-        
-        println!("Wave {} using template index {} with enemies:", self.wave, template_index);
-        for (enemy_type, count) in template {
-            println!("  - {:?} x{}", enemy_type, count);
-        }
-        
-        // Spawn different formations based on wave
-        match self.wave % 4 {
-            1 => self.spawn_arc_formation(template, &mut rng),
-            2 => self.spawn_pincer_formation(template, &mut rng),
-            3 => self.spawn_surround_formation(template, &mut rng),
-            _ => self.spawn_ambush_formation(template, &mut rng),
-        }
+        // This function is deprecated - enemies now spawn from bases
     }
     
     fn spawn_arc_formation(&mut self, template: &Vec<(EnemyType, usize)>, rng: &mut impl Rng) {
@@ -338,11 +365,160 @@ impl Game {
             }
         }
     }
+    */
 
+    fn generate_bases(&mut self) {
+        let mut rng = thread_rng();
+        
+        // Map is approximately 51,360 x 51,360 units (terrain scale from view_distance=160)
+        // Let's spread bases across the entire map
+        const MAP_SIZE: f32 = 50000.0; // Slightly less than full size to avoid edges
+        
+        // Create a grid of bases across the map
+        let base_configs = [
+            // Central fortress
+            (BaseType::Fortress, Vec3::new(0.0, 0.0, 0.0)),
+            
+            // Four large bases at cardinal directions
+            (BaseType::Large, Vec3::new(MAP_SIZE * 0.7, 0.0, 0.0)),
+            (BaseType::Large, Vec3::new(-MAP_SIZE * 0.7, 0.0, 0.0)),
+            (BaseType::Large, Vec3::new(0.0, 0.0, MAP_SIZE * 0.7)),
+            (BaseType::Large, Vec3::new(0.0, 0.0, -MAP_SIZE * 0.7)),
+            
+            // Medium bases at diagonals
+            (BaseType::Medium, Vec3::new(MAP_SIZE * 0.5, 0.0, MAP_SIZE * 0.5)),
+            (BaseType::Medium, Vec3::new(-MAP_SIZE * 0.5, 0.0, MAP_SIZE * 0.5)),
+            (BaseType::Medium, Vec3::new(MAP_SIZE * 0.5, 0.0, -MAP_SIZE * 0.5)),
+            (BaseType::Medium, Vec3::new(-MAP_SIZE * 0.5, 0.0, -MAP_SIZE * 0.5)),
+            
+            // Small bases scattered around
+            (BaseType::Small, Vec3::new(MAP_SIZE * 0.3, 0.0, MAP_SIZE * 0.2)),
+            (BaseType::Small, Vec3::new(-MAP_SIZE * 0.3, 0.0, MAP_SIZE * 0.2)),
+            (BaseType::Small, Vec3::new(MAP_SIZE * 0.2, 0.0, -MAP_SIZE * 0.3)),
+            (BaseType::Small, Vec3::new(-MAP_SIZE * 0.2, 0.0, -MAP_SIZE * 0.3)),
+            (BaseType::Small, Vec3::new(MAP_SIZE * 0.4, 0.0, -MAP_SIZE * 0.2)),
+            (BaseType::Small, Vec3::new(-MAP_SIZE * 0.4, 0.0, -MAP_SIZE * 0.1)),
+            (BaseType::Small, Vec3::new(MAP_SIZE * 0.1, 0.0, MAP_SIZE * 0.4)),
+            (BaseType::Small, Vec3::new(-MAP_SIZE * 0.1, 0.0, MAP_SIZE * 0.4)),
+        ];
+        
+        for (base_type, offset) in &base_configs {
+            // Add some randomness to positions (but not too much for strategic placement)
+            let variation = match base_type {
+                BaseType::Fortress => 0.0, // Fortress always at center
+                BaseType::Large => 2000.0,
+                BaseType::Medium => 3000.0,
+                BaseType::Small => 4000.0,
+            };
+            
+            let x = offset.x + if variation > 0.0 { rng.gen_range(-variation..variation) } else { 0.0 };
+            let z = offset.z + if variation > 0.0 { rng.gen_range(-variation..variation) } else { 0.0 };
+            
+            // Ensure bases aren't too close to map edges
+            let x = x.clamp(-MAP_SIZE * 0.9, MAP_SIZE * 0.9);
+            let z = z.clamp(-MAP_SIZE * 0.9, MAP_SIZE * 0.9);
+            
+            self.bases.push(Base::new(x, z, *base_type));
+        }
+        
+        println!("Generated {} initial bases across {}x{} unit map", self.bases.len(), MAP_SIZE * 2.0, MAP_SIZE * 2.0);
+    }
+    
+    fn add_wave_bases(&mut self) {
+        let mut rng = thread_rng();
+        
+        const MAP_SIZE: f32 = 50000.0;
+        
+        // Add bases based on wave number
+        let new_base_count = ((self.wave - 1) / 3 + 1).min(3) as usize;
+        
+        for _ in 0..new_base_count {
+            // Generate bases at random locations across the map
+            // Higher waves spawn bases further from center
+            let min_distance = 5000.0 + (self.wave as f32 * 2000.0);
+            let max_distance = min_distance + 15000.0;
+            let distance = rng.gen_range(min_distance..max_distance.min(MAP_SIZE * 0.8));
+            let angle = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+            let x = angle.cos() * distance;
+            let z = angle.sin() * distance;
+            
+            let base_type = match self.wave {
+                1..=3 => BaseType::Small,
+                4..=6 => BaseType::Medium,
+                7..=9 => BaseType::Large,
+                _ => if rng.gen_bool(0.3) { BaseType::Fortress } else { BaseType::Large },
+            };
+            
+            self.bases.push(Base::new(x, z, base_type));
+            println!("Added new {} base at ({:.0}, {:.0})", 
+                match base_type {
+                    BaseType::Small => "Small",
+                    BaseType::Medium => "Medium", 
+                    BaseType::Large => "Large",
+                    BaseType::Fortress => "Fortress",
+                }, x, z);
+        }
+    }
+    
+    fn spawn_enemies_from_base_data(&mut self, base_pos: Vec3, enemy_types: Vec<EnemyType>, routes: Vec<Vec<Vec3>>) {
+        let mut rng = thread_rng();
+        
+        // Spawn 5-8 enemies per spawn cycle - much more aggressive
+        let spawn_count = rng.gen_range(5..=8);
+        
+        for i in 0..spawn_count {
+            if let Some(enemy_type) = enemy_types.choose(&mut rng) {
+                // Spawn enemy near base
+                let angle = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+                let spawn_offset = Vec3::new(angle.cos() * 100.0, 50.0, angle.sin() * 100.0);
+                let spawn_pos = base_pos + spawn_offset;
+                
+                let mut enemy = Enemy::new(spawn_pos.x, spawn_pos.z, *enemy_type);
+                enemy.pos.y = spawn_pos.y;
+                
+                // Assign a patrol route
+                if let Some(route) = routes.get(i % routes.len()) {
+                    enemy.set_patrol_route(route.clone());
+                }
+                
+                self.enemies.push(enemy);
+            }
+        }
+    }
+    
     fn check_collisions(&mut self) {
         let mut bullets_to_remove = vec![];
         let mut enemies_to_remove = vec![];
         let mut reflected_bullets = vec![];
+        
+        // Check bullet-base collisions (player bullets only)
+        for (bi, bullet) in self.bullets.iter().enumerate() {
+            if matches!(bullet.bullet_type, BulletType::Player) {
+                for base in &mut self.bases {
+                    if base.is_active {
+                        let dist = (bullet.pos - base.pos).length();
+                        if dist < 50.0 { // Base hit radius
+                            bullets_to_remove.push(bi);
+                            base.take_damage(25.0);
+                            
+                            // Create impact particles
+                            for _ in 0..10 {
+                                self.particles.push(Particle::new(bullet.pos));
+                            }
+                            
+                            if !base.is_active {
+                                // Base destroyed - big explosion
+                                for _ in 0..50 {
+                                    self.particles.push(Particle::new(base.pos));
+                                }
+                                self.score += 500; // Bonus for destroying base
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         
         // Check bullet-enemy collisions (player bullets only)
         for (bi, bullet) in self.bullets.iter().enumerate() {
@@ -384,12 +560,21 @@ impl Game {
                     if dist < 25.0 && self.player_invulnerable_timer <= 0.0 {
                         bullets_to_remove.push(bi);
                         
-                        // Create hit effect
-                        for _ in 0..10 {
-                            self.particles.push(Particle::new(self.player.pos));
+                        // Player takes damage
+                        if self.player.take_damage(0.25) {
+                            // Shield didn't absorb it - player is hit
+                            self.player_invulnerable_timer = 1.0;
+                            
+                            // Create hit effect
+                            for _ in 0..15 {
+                                self.particles.push(Particle::new(self.player.pos));
+                            }
+                        } else {
+                            // Shield absorbed the hit
+                            for _ in 0..5 {
+                                self.particles.push(Particle::new(self.player.pos));
+                            }
                         }
-                        
-                        self.player_invulnerable_timer = 1.0;
                     }
                     
                     // Check reflection by reflector enemies
@@ -416,10 +601,15 @@ impl Game {
             let dist = (self.player.pos - enemy.pos).length();
             if dist < 40.0 && self.player_invulnerable_timer <= 0.0 {
                 enemies_to_remove.push(ei);
+                
+                // Collision damage
+                if self.player.take_damage(0.5) {
+                    self.player_invulnerable_timer = 1.0;
+                }
+                
                 for _ in 0..20 {
                     self.particles.push(Particle::new(enemy.pos));
                 }
-                self.player_invulnerable_timer = 1.0; // 1 second of invulnerability
             }
             
             // Check laser collision with player
@@ -511,6 +701,30 @@ impl Game {
         // Add reflected bullets
         for (enemy, dir) in reflected_bullets {
             self.bullets.push(Bullet::new_enemy(&enemy, dir));
+        }
+    }
+    
+    fn alert_enemies_to_sound(&mut self, sound_pos: Vec3, sound_radius: f32) {
+        for enemy in &mut self.enemies {
+            let distance = (enemy.pos - sound_pos).length();
+            
+            // Check if enemy can hear the sound
+            if distance <= sound_radius && distance <= enemy.hearing_range {
+                match enemy.alert_state {
+                    crate::enemy::AlertState::Unaware => {
+                        // Become suspicious and investigate
+                        enemy.alert_state = crate::enemy::AlertState::Suspicious;
+                        enemy.investigation_point = sound_pos;
+                        enemy.alert_cooldown = 3.0;
+                    }
+                    crate::enemy::AlertState::Suspicious => {
+                        // Already suspicious - update investigation point
+                        enemy.investigation_point = sound_pos;
+                        enemy.alert_cooldown = 3.0;
+                    }
+                    _ => {} // Already alert or searching
+                }
+            }
         }
     }
 }

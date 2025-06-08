@@ -2,7 +2,6 @@ use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
 use crate::player::Player;
 use crate::enemy::Enemy;
-use crate::math::rotation_matrix;
 
 #[derive(Clone)]
 pub enum BulletType {
@@ -19,18 +18,20 @@ pub struct Bullet {
 
 impl Bullet {
     pub fn new(player: &Player) -> Self {
-        // Fire bullet in the direction the player ship is pointing
-        // Use the full rotation matrix including pitch and banking
-        let rotation = rotation_matrix(player.rotation, player.pitch, player.banking);
+        // Fire bullet in the horizontal direction the player is facing
+        // Only use yaw rotation, ignore pitch and banking for bullets
+        let forward = Vec3::new(-player.rotation.sin(), 0.0, -player.rotation.cos());
         
-        // The ship's forward direction is along the negative Z axis in local space
-        let forward = rotation.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
-        
-        // Spawn bullet slightly in front of the ship's nose
+        // Spawn bullet at player height, in front
         let spawn_offset = forward * 30.0;
+        let spawn_pos = Vec3::new(
+            player.pos.x + spawn_offset.x,
+            player.pos.y,  // Same height as player
+            player.pos.z + spawn_offset.z
+        );
         
         Self {
-            pos: player.pos + spawn_offset,
+            pos: spawn_pos,
             vel: forward * 1200.0,
             bullet_type: BulletType::Player,
         }
@@ -41,6 +42,14 @@ impl Bullet {
             pos: enemy.pos + direction * 30.0,
             vel: direction * 600.0, // Enemy bullets are slower
             bullet_type: BulletType::Enemy,
+        }
+    }
+    
+    pub fn new_at_position(pos: Vec3, direction: Vec3, bullet_type: BulletType) -> Self {
+        Self {
+            pos,
+            vel: direction * 600.0,
+            bullet_type,
         }
     }
 

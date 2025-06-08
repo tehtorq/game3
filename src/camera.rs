@@ -23,7 +23,7 @@ impl Camera {
         );
         
         let camera_pos = player.pos + camera_offset;
-        let look_target = player.pos + Vec3::new(0.0, 20.0, 0.0); // Look slightly above player
+        let look_target = player.pos; // Look directly at player
         let up = Vec3::new(0.0, 1.0, 0.0);
         
         // Use left-handed coordinate system (this worked)
