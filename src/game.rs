@@ -129,9 +129,10 @@ impl Game {
         }
         
         // Create bullets from base turrets
-        for (pos, dir) in base_bullets {
-            let mut bullet = Bullet::new_at_position(pos, dir, BulletType::Enemy);
-            bullet.vel = dir * 400.0; // Turret bullets
+        for (pos, dir, is_heavy) in base_bullets {
+            let bullet_type = if is_heavy { BulletType::HeavyTurret } else { BulletType::Enemy };
+            let mut bullet = Bullet::new_at_position(pos, dir, bullet_type);
+            bullet.vel = dir * if is_heavy { 450.0 } else { 350.0 }; // Slightly slower for visibility
             self.bullets.push(bullet);
         }
         
@@ -491,15 +492,21 @@ impl Game {
         let mut enemies_to_remove = vec![];
         let mut reflected_bullets = vec![];
         
-        // Check bullet-base collisions (player bullets only)
+        // Check bullet-base and ground turret collisions (player bullets only)
+        let mut turret_hits = Vec::new(); // (base_idx, turret_idx, bullet_pos)
+        
         for (bi, bullet) in self.bullets.iter().enumerate() {
             if matches!(bullet.bullet_type, BulletType::Player) {
-                for base in &mut self.bases {
+                let mut hit_something = false;
+                
+                for (base_idx, base) in self.bases.iter_mut().enumerate() {
                     if base.is_active {
+                        // Check main base collision
                         let dist = (bullet.pos - base.pos).length();
                         if dist < 50.0 { // Base hit radius
                             bullets_to_remove.push(bi);
                             base.take_damage(25.0);
+                            hit_something = true;
                             
                             // Create impact particles
                             for _ in 0..10 {
@@ -516,6 +523,50 @@ impl Game {
                             break;
                         }
                     }
+                    
+                    if hit_something {
+                        break;
+                    }
+                }
+                
+                // Check ground turret collisions separately to avoid double borrow
+                if !hit_something {
+                    for (base_idx, base) in self.bases.iter().enumerate() {
+                        if base.is_active {
+                            let turret_positions = base.get_ground_turret_positions();
+                            for (turret_idx, turret_pos, is_active) in turret_positions {
+                                if is_active {
+                                    let dist = (bullet.pos - turret_pos).length();
+                                    if dist < 20.0 { // Turret hit radius
+                                        bullets_to_remove.push(bi);
+                                        turret_hits.push((base_idx, turret_idx, bullet.pos, turret_pos));
+                                        hit_something = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if hit_something {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Process turret hits
+        for (base_idx, turret_idx, bullet_pos, turret_pos) in turret_hits {
+            if self.bases[base_idx].damage_ground_turret(turret_idx, 25.0) {
+                // Turret destroyed
+                for _ in 0..20 {
+                    self.particles.push(Particle::new(turret_pos));
+                }
+                self.score += 100; // Points for destroying turret
+            } else {
+                // Just damaged
+                for _ in 0..5 {
+                    self.particles.push(Particle::new(bullet_pos));
                 }
             }
         }
@@ -554,14 +605,19 @@ impl Game {
                         }
                     }
                 }
-                BulletType::Enemy => {
+                BulletType::Enemy | BulletType::HeavyTurret => {
                     // Check collision with player
                     let dist = (bullet.pos - self.player.pos).length();
                     if dist < 25.0 && self.player_invulnerable_timer <= 0.0 {
                         bullets_to_remove.push(bi);
                         
-                        // Player takes damage
-                        if self.player.take_damage(0.25) {
+                        // Player takes damage - heavy turrets do more damage
+                        let damage = match bullet.bullet_type {
+                            BulletType::HeavyTurret => 0.5, // Double damage
+                            _ => 0.25,
+                        };
+                        
+                        if self.player.take_damage(damage) {
                             // Shield didn't absorb it - player is hit
                             self.player_invulnerable_timer = 1.0;
                             

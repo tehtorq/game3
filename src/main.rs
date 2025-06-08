@@ -569,7 +569,7 @@ impl EventHandler for Stage {
             let mut renderer = Renderer::new(&mut vertices, &mut indices);
             renderer.set_mode(RenderMode::Lines);
             
-            // Draw enemy bullets
+            // Draw regular enemy bullets
             for bullet in &self.game.bullets {
                 if matches!(bullet.bullet_type, BulletType::Enemy) {
                     bullet.draw(&mut renderer);
@@ -583,6 +583,31 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw heavy turret bullets in bright white
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines); // Use lines for better visibility
+            
+            // Draw heavy turret bullets
+            for bullet in &self.game.bullets {
+                if matches!(bullet.bullet_type, BulletType::HeavyTurret) {
+                    bullet.draw(&mut renderer);
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // Bright white
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         

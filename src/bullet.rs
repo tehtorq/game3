@@ -7,6 +7,7 @@ use crate::enemy::Enemy;
 pub enum BulletType {
     Player,
     Enemy,
+    HeavyTurret, // Ground turret bullets - more damage
 }
 
 #[derive(Clone)]
@@ -60,11 +61,14 @@ impl Bullet {
 
 impl Drawable for Bullet {
     fn draw(&self, renderer: &mut Renderer) {
-        // Draw bullet as a small 3D cross
+        // Draw all bullets as 3D crosses
         let size = match self.bullet_type {
             BulletType::Player => 5.0,
-            BulletType::Enemy => 7.0, // Enemy bullets are larger
+            BulletType::Enemy => 7.0,
+            BulletType::HeavyTurret => 4.0, // Smaller but visible
         };
+        
+        // Draw 3D cross
         renderer.draw_line(
             self.pos - Vec3::new(size, 0.0, 0.0),
             self.pos + Vec3::new(size, 0.0, 0.0)

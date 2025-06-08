@@ -1,12 +1,13 @@
 use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
-// Bullet imports not needed as we return (pos, dir) tuples instead
+use rand::prelude::*;
 use std::f32::consts::PI;
 
 pub struct Base {
     pub pos: Vec3,
     pub health: f32,
     pub turrets: Vec<Turret>,
+    pub ground_turrets: Vec<GroundTurret>,  // Heavy defensive turrets
     pub spawn_timer: f32,
     pub spawn_interval: f32,
     pub is_active: bool,
@@ -31,6 +32,16 @@ pub struct Turret {
     pub range: f32,
 }
 
+pub struct GroundTurret {
+    pub pos: Vec3,         // World position
+    pub rotation: f32,     // Current rotation
+    pub pitch: f32,        // Vertical aim
+    pub fire_timer: f32,   // Time until next shot
+    pub burst_count: i32,  // Shots remaining in burst
+    pub is_active: bool,   // Can be destroyed independently
+    pub health: f32,
+}
+
 impl Base {
     pub fn new(x: f32, z: f32, base_type: BaseType) -> Self {
         let y = terrain_height_at(x, z) + 20.0; // Place base slightly above terrain
@@ -48,10 +59,10 @@ impl Base {
         for i in 0..turret_count {
             let angle = i as f32 * PI * 2.0 / turret_count as f32;
             let radius = match base_type {
-                BaseType::Small => 40.0,
-                BaseType::Medium => 60.0,
-                BaseType::Large => 80.0,
-                BaseType::Fortress => 100.0,
+                BaseType::Small => 60.0,   // Spread base turrets out more too
+                BaseType::Medium => 90.0,
+                BaseType::Large => 120.0,
+                BaseType::Fortress => 150.0,
             };
             
             turrets.push(Turret {
@@ -60,7 +71,40 @@ impl Base {
                 pitch: 0.0,
                 fire_timer: i as f32 * 0.5, // Stagger initial fire times
                 tracking_speed: 4.0,
-                range: 1500.0,
+                range: 6000.0, // Double range - engage from very far away
+            });
+        }
+        
+        // Create ground turrets - heavy defensive emplacements
+        let ground_turret_count = match base_type {
+            BaseType::Small => 6,     // More turrets for chaos
+            BaseType::Medium => 8,
+            BaseType::Large => 12,
+            BaseType::Fortress => 16,
+        };
+        
+        let ground_turret_radius = match base_type {
+            BaseType::Small => 200.0,   // Spread out more
+            BaseType::Medium => 300.0,
+            BaseType::Large => 400.0,
+            BaseType::Fortress => 500.0,
+        };
+        
+        let mut ground_turrets = Vec::new();
+        for i in 0..ground_turret_count {
+            let angle = i as f32 * PI * 2.0 / ground_turret_count as f32;
+            let turret_x = x + angle.cos() * ground_turret_radius;
+            let turret_z = z + angle.sin() * ground_turret_radius;
+            let turret_y = terrain_height_at(turret_x, turret_z) + 5.0; // Lower to ground
+            
+            ground_turrets.push(GroundTurret {
+                pos: Vec3::new(turret_x, turret_y, turret_z),
+                rotation: angle + PI, // Face inward initially
+                pitch: 0.0,
+                fire_timer: i as f32 * 0.2, // Stagger fire times more closely
+                burst_count: 0,
+                is_active: true,
+                health: 50.0,
             });
         }
         
@@ -73,6 +117,7 @@ impl Base {
                 BaseType::Fortress => 500.0,
             },
             turrets,
+            ground_turrets,
             spawn_timer: 5.0, // Initial delay before spawning
             spawn_interval,
             is_active: true,
@@ -81,7 +126,7 @@ impl Base {
         }
     }
     
-    pub fn update(&mut self, player_pos: Vec3, dt: f32) -> Vec<(Vec3, Vec3)> {
+    pub fn update(&mut self, player_pos: Vec3, dt: f32) -> Vec<(Vec3, Vec3, bool)> { // bool = is_heavy
         if !self.is_active {
             return Vec::new();
         }
@@ -95,6 +140,7 @@ impl Base {
         // Update turrets and collect bullets to fire
         let mut bullets = Vec::new();
         
+        // Update base turrets (lighter, faster tracking)
         for turret in &mut self.turrets {
             // Calculate turret world position
             let turret_pos = self.pos + turret.offset;
@@ -121,8 +167,57 @@ impl Base {
                 if turret.fire_timer <= 0.0 && rotation_diff.abs() < 0.3 {
                     // Calculate bullet direction
                     let dir = to_player.normalize();
-                    bullets.push((turret_pos, dir));
-                    turret.fire_timer = 1.0; // Fire every second - much faster
+                    bullets.push((turret_pos, dir, false)); // Regular turret
+                    turret.fire_timer = 0.5; // Fire twice per second
+                }
+            }
+        }
+        
+        // Update ground turrets (heavy, burst fire)
+        for ground_turret in &mut self.ground_turrets {
+            if !ground_turret.is_active {
+                continue;
+            }
+            
+            let to_player = player_pos - ground_turret.pos;
+            let distance = to_player.length();
+            
+            // Ground turrets have extreme range for early engagement
+            if distance < 10000.0 && distance > 20.0 { // Extreme range - start firing very early
+                // Calculate desired rotation to face player
+                let horizontal_dir = Vec3::new(to_player.x, 0.0, to_player.z).normalize();
+                let target_rotation = horizontal_dir.z.atan2(horizontal_dir.x);
+                
+                // Slower tracking for heavier turrets
+                let rotation_diff = angle_difference(ground_turret.rotation, target_rotation);
+                ground_turret.rotation += rotation_diff.clamp(-1.5 * dt, 1.5 * dt);
+                
+                // Calculate pitch
+                let horizontal_dist = (to_player.x * to_player.x + to_player.z * to_player.z).sqrt();
+                let target_pitch = (to_player.y / horizontal_dist).atan();
+                ground_turret.pitch += (target_pitch - ground_turret.pitch) * 1.5 * dt;
+                
+                // Fire burst if ready and aimed
+                ground_turret.fire_timer -= dt;
+                
+                // Handle burst firing
+                if ground_turret.burst_count > 0 && ground_turret.fire_timer <= 0.0 {
+                    // Fire a shot in the burst
+                    let spread = 0.08; // More spread for chaotic effect
+                    let dir = to_player.normalize();
+                    let spread_x = (random::<f32>() - 0.5) * spread;
+                    let spread_y = (random::<f32>() - 0.5) * spread;
+                    let spread_z = (random::<f32>() - 0.5) * spread;
+                    let spread_dir = (dir + Vec3::new(spread_x, spread_y, spread_z)).normalize();
+                    
+                    bullets.push((ground_turret.pos + Vec3::new(0.0, 5.0, 0.0), spread_dir, true)); // Heavy turret
+                    ground_turret.burst_count -= 1;
+                    ground_turret.fire_timer = 0.05; // Very fast burst fire for chaos
+                    
+                } else if ground_turret.burst_count == 0 && ground_turret.fire_timer <= 0.0 && rotation_diff.abs() < 0.2 {
+                    // Start new burst
+                    ground_turret.burst_count = 8; // 8-round burst for more chaos
+                    ground_turret.fire_timer = 0.0;
                 }
             }
         }
@@ -135,6 +230,25 @@ impl Base {
         if self.health <= 0.0 {
             self.is_active = false;
         }
+    }
+    
+    pub fn damage_ground_turret(&mut self, turret_index: usize, damage: f32) -> bool {
+        if let Some(turret) = self.ground_turrets.get_mut(turret_index) {
+            if turret.is_active {
+                turret.health -= damage;
+                if turret.health <= 0.0 {
+                    turret.is_active = false;
+                    return true; // Turret destroyed
+                }
+            }
+        }
+        false
+    }
+    
+    pub fn get_ground_turret_positions(&self) -> Vec<(usize, Vec3, bool)> {
+        self.ground_turrets.iter().enumerate()
+            .map(|(i, t)| (i, t.pos, t.is_active))
+            .collect()
     }
     
     pub fn should_spawn(&self) -> bool {
@@ -202,10 +316,10 @@ impl Drawable for Base {
         }
         
         let size = match self.base_type {
-            BaseType::Small => 30.0,
-            BaseType::Medium => 45.0,
-            BaseType::Large => 60.0,
-            BaseType::Fortress => 80.0,
+            BaseType::Small => 50.0,   // Bigger bases to match spread turrets
+            BaseType::Medium => 70.0,
+            BaseType::Large => 90.0,
+            BaseType::Fortress => 120.0,
         };
         
         // Draw main structure - octagonal base
@@ -293,6 +407,97 @@ impl Drawable for Base {
             renderer.draw_triangle(barrel_end, barrel_base + up, barrel_base - right);
             renderer.draw_triangle(barrel_end, barrel_base - right, barrel_base - up);
             renderer.draw_triangle(barrel_end, barrel_base - up, barrel_base + right);
+        }
+        
+        // Draw ground turrets
+        for ground_turret in &self.ground_turrets {
+            if !ground_turret.is_active {
+                continue;
+            }
+            
+            // Heavy turret base - octagonal bunker
+            let bunker_size = 15.0;
+            let bunker_height = 8.0;
+            let segments = 8;
+            
+            // Base vertices
+            let mut base_verts = Vec::new();
+            for i in 0..segments {
+                let angle = i as f32 * PI * 2.0 / segments as f32;
+                base_verts.push(ground_turret.pos + Vec3::new(
+                    angle.cos() * bunker_size,
+                    0.0,
+                    angle.sin() * bunker_size
+                ));
+            }
+            
+            // Draw bunker walls
+            for i in 0..segments {
+                let next = (i + 1) % segments;
+                let top_a = base_verts[i] + Vec3::new(0.0, bunker_height, 0.0);
+                let top_b = base_verts[next] + Vec3::new(0.0, bunker_height, 0.0);
+                
+                renderer.draw_triangle(base_verts[i], base_verts[next], top_a);
+                renderer.draw_triangle(base_verts[next], top_b, top_a);
+            }
+            
+            // Draw bunker top
+            let center_top = ground_turret.pos + Vec3::new(0.0, bunker_height, 0.0);
+            for i in 0..segments {
+                let next = (i + 1) % segments;
+                renderer.draw_triangle(
+                    center_top,
+                    base_verts[i] + Vec3::new(0.0, bunker_height, 0.0),
+                    base_verts[next] + Vec3::new(0.0, bunker_height, 0.0)
+                );
+            }
+            
+            // Heavy dual barrels
+            let barrel_length = 25.0;
+            let barrel_offset = 4.0;
+            let barrel_base_height = bunker_height + 2.0;
+            
+            // Calculate barrel direction
+            let barrel_dir = Vec3::new(
+                ground_turret.rotation.cos() * ground_turret.pitch.cos(),
+                ground_turret.pitch.sin(),
+                ground_turret.rotation.sin() * ground_turret.pitch.cos()
+            );
+            
+            // Right vector for barrel separation
+            let right = Vec3::new(-barrel_dir.z, 0.0, barrel_dir.x).normalize() * barrel_offset;
+            let up = barrel_dir.cross(right).normalize() * 2.0;
+            
+            // Draw two barrels
+            for side in [-1.0, 1.0] {
+                let barrel_base = ground_turret.pos + Vec3::new(0.0, barrel_base_height, 0.0) + right * side;
+                let barrel_end = barrel_base + barrel_dir * barrel_length;
+                
+                // Hexagonal barrel
+                for i in 0..6 {
+                    let angle1 = i as f32 * PI / 3.0;
+                    let angle2 = (i + 1) as f32 * PI / 3.0;
+                    
+                    let offset1 = right * angle1.cos() * 1.5 + up * angle1.sin() * 1.5;
+                    let offset2 = right * angle2.cos() * 1.5 + up * angle2.sin() * 1.5;
+                    
+                    renderer.draw_triangle(barrel_end, barrel_base + offset1, barrel_base + offset2);
+                }
+            }
+            
+            // Muzzle flash effect when firing
+            if ground_turret.burst_count > 0 {
+                let flash_size = 8.0;
+                let flash_pos = ground_turret.pos + Vec3::new(0.0, barrel_base_height, 0.0) + barrel_dir * (barrel_length + 5.0);
+                
+                // Draw flash as star shape
+                for i in 0..4 {
+                    let angle = i as f32 * PI / 2.0;
+                    let v1 = flash_pos + right * angle.cos() * flash_size + up * angle.sin() * flash_size;
+                    let v2 = flash_pos + right * (angle + PI/4.0).cos() * flash_size * 0.5 + up * (angle + PI/4.0).sin() * flash_size * 0.5;
+                    renderer.draw_triangle(flash_pos, v1, v2);
+                }
+            }
         }
     }
 }
