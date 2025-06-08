@@ -17,6 +17,7 @@ mod game;
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
 use bullet::BulletType;
+use enemy::EnemyType;
 use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
@@ -281,26 +282,43 @@ impl EventHandler for Stage {
             self.ctx.draw(0, terrain.index_count(), terrain.instance_count());
         }
         
-        // Draw enemies in red
+        // Draw enemies with different colors per type
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Triangles);
-            
-            for enemy in &self.game.enemies {
-                enemy.draw(&mut renderer);
-            }
-        }
+        // Group enemies by type for batch rendering with different colors
+        let enemy_colors = [
+            (EnemyType::Cube, [0.0, 1.0, 0.0]),       // Green - basic
+            (EnemyType::Pyramid, [1.0, 0.0, 0.0]),    // Red - aggressive
+            (EnemyType::Spinner, [1.0, 0.5, 0.0]),    // Orange - orbital
+            (EnemyType::Hunter, [1.0, 0.0, 1.0]),     // Magenta - dangerous
+            (EnemyType::Guardian, [0.5, 0.5, 0.5]),   // Gray - defensive
+            (EnemyType::Laser, [0.0, 0.5, 1.0]),      // Blue - laser enemy
+        ];
         
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.triangle_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.0, 0.0]))); // Red
-            self.ctx.draw(0, indices.len() as i32, 1);
+        for (enemy_type, color) in &enemy_colors {
+            vertices.clear();
+            indices.clear();
+            
+            {
+                let mut renderer = Renderer::new(&mut vertices, &mut indices);
+                renderer.set_mode(RenderMode::Triangles);
+                
+                for enemy in &self.game.enemies {
+                    if enemy.enemy_type == *enemy_type {
+                        enemy.draw(&mut renderer);
+                    }
+                }
+            }
+            
+            if !vertices.is_empty() {
+                self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+                self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+                self.ctx.apply_pipeline(&self.triangle_pipeline);
+                self.ctx.apply_bindings(&self.bindings);
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, *color)));
+                self.ctx.draw(0, indices.len() as i32, 1);
+            }
         }
         
         // Draw player in cyan
@@ -377,6 +395,101 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Draw laser beams in two passes - lines for core and triangles for glow
+        vertices.clear();
+        indices.clear();
+        
+        // First pass: Draw laser core as bright lines
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Lines);
+            
+            for enemy in &self.game.enemies {
+                if let Some((laser_start, laser_end)) = enemy.get_laser_info() {
+                    // Draw bright core line
+                    renderer.draw_line(laser_start, laser_end);
+                    
+                    // Add some extra lines for thickness and 3D effect
+                    let laser_dir = (laser_end - laser_start).normalize();
+                    
+                    // Calculate perpendicular vectors for creating a 3D beam
+                    let up = Vec3::new(0.0, 1.0, 0.0);
+                    let laser_right = laser_dir.cross(up).normalize();
+                    let laser_up = laser_right.cross(laser_dir).normalize();
+                    
+                    // Draw multiple lines to create a cylindrical beam effect
+                    for i in 0..8 {
+                        let angle = i as f32 * std::f32::consts::PI * 2.0 / 8.0;
+                        let offset_x = angle.cos() * 8.0;
+                        let offset_y = angle.sin() * 8.0;
+                        let offset = laser_right * offset_x + laser_up * offset_y;
+                        
+                        renderer.draw_line(
+                            laser_start + offset,
+                            laser_end + offset
+                        );
+                    }
+                    
+                    // Add some intermediate points for a slight curve effect
+                    let mid_point = (laser_start + laser_end) * 0.5;
+                    renderer.draw_line(laser_start, mid_point);
+                    renderer.draw_line(mid_point, laser_end);
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            // Bright yellow for laser core
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0])));
+            self.ctx.draw(0, indices.len() as i32, 1);
+        }
+        
+        // Second pass: Draw laser glow as triangles
+        vertices.clear();
+        indices.clear();
+        
+        {
+            let mut renderer = Renderer::new(&mut vertices, &mut indices);
+            renderer.set_mode(RenderMode::Triangles);
+            
+            for enemy in &self.game.enemies {
+                if let Some((laser_start, laser_end)) = enemy.get_laser_info() {
+                    let laser_dir = (laser_end - laser_start).normalize();
+                    let laser_right = Vec3::new(-laser_dir.z, 0.0, laser_dir.x).normalize();
+                    
+                    // Draw wide glow
+                    let width = 40.0;
+                    let right_offset = laser_right * width;
+                    
+                    renderer.draw_triangle(
+                        laser_start - right_offset,
+                        laser_start + right_offset,
+                        laser_end + right_offset
+                    );
+                    
+                    renderer.draw_triangle(
+                        laser_start - right_offset,
+                        laser_end + right_offset,
+                        laser_end - right_offset
+                    );
+                }
+            }
+        }
+        
+        if !vertices.is_empty() {
+            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
+            self.ctx.apply_bindings(&self.bindings);
+            // Translucent yellow-orange for glow
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.8, 0.2])));
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         

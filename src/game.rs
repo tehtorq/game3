@@ -3,9 +3,39 @@ use std::f32::consts::PI;
 
 use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
+
+// Calculate terrain height at a given position (matches shader calculation)
+fn terrain_height_at(x: f32, z: f32) -> f32 {
+    let base_y = 20.0;
+    
+    // Large-scale terrain features
+    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
+    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
+    
+    // Gentle slopes
+    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
+    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
+    
+    // Roughness
+    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
+    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
+    roughness = (roughness + 1.5) / 3.0;
+    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
+    
+    // Bumpy details
+    let mut bumps = 0.0;
+    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
+    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
+    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
+    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
+    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
+    
+    base_y + large_scale + gentle + (bumps * roughness)
+}
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::Particle;
 use crate::renderer::Renderer;
+use glam::Vec3;
 
 pub struct Game {
     pub player: Player,
@@ -16,6 +46,7 @@ pub struct Game {
     pub shoot_cooldown: f32,
     pub wave: u32,
     pub score: u32,
+    pub player_invulnerable_timer: f32,  // Brief invulnerability after being hit
 }
 
 impl Game {
@@ -29,6 +60,7 @@ impl Game {
             shoot_cooldown: 0.0,
             wave: 1,
             score: 0,
+            player_invulnerable_timer: 0.0,
         };
         
         game.spawn_wave();
@@ -39,6 +71,11 @@ impl Game {
     pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, boost: bool, dt: f32) {
         // Update player
         self.player.update(left, right, up, down, boost, dt);
+        
+        // Update invulnerability timer
+        if self.player_invulnerable_timer > 0.0 {
+            self.player_invulnerable_timer -= dt;
+        }
         
         // Handle shooting
         if shoot && self.shoot_cooldown <= 0.0 {
@@ -64,9 +101,34 @@ impl Game {
             distance < 5000.0 && (e.pos.z < player_z || e.pos.z > player_z - 2000.0)
         });
         
-        // Update bullets
-        for bullet in &mut self.bullets {
+        // Update bullets and check terrain collisions
+        let mut terrain_hits = Vec::new();
+        for (i, bullet) in self.bullets.iter_mut().enumerate() {
             bullet.update(dt);
+            
+            // Check if bullet hit terrain
+            let terrain_height = terrain_height_at(bullet.pos.x, bullet.pos.z);
+            if bullet.pos.y < terrain_height {
+                terrain_hits.push((i, bullet.pos));
+            }
+        }
+        
+        // Create particles for terrain hits
+        for (_, hit_pos) in &terrain_hits {
+            // Create dust/debris particles at impact point
+            for _ in 0..10 {
+                // Offset particle spawn slightly above terrain impact
+                let particle_pos = *hit_pos + Vec3::new(0.0, 5.0, 0.0);
+                self.particles.push(Particle::new(particle_pos));
+            }
+        }
+        
+        // Remove bullets that hit terrain
+        let mut hits_to_remove: Vec<usize> = terrain_hits.iter().map(|(i, _)| *i).collect();
+        hits_to_remove.sort_unstable();
+        hits_to_remove.dedup();
+        for &i in hits_to_remove.iter().rev() {
+            self.bullets.remove(i);
         }
         
         // Remove bullets that are too far away
@@ -84,6 +146,8 @@ impl Game {
         // Spawn new enemies with longer intervals
         self.enemy_spawn_timer -= dt;
         if self.enemy_spawn_timer <= 0.0 {
+            self.wave += 1;  // Increment wave counter
+            println!("Spawning wave {}", self.wave);
             self.spawn_wave();
             // Longer spawn intervals: 5-8 seconds based on wave
             self.enemy_spawn_timer = (8.0 - (self.wave as f32 * 0.3)).max(5.0);
@@ -102,16 +166,21 @@ impl Game {
         let wave_templates = [
             // Wave 1-3: Basic enemies
             vec![(EnemyType::Cube, 5), (EnemyType::Pyramid, 2)],
-            // Wave 4-6: Add spinners
-            vec![(EnemyType::Cube, 4), (EnemyType::Pyramid, 3), (EnemyType::Spinner, 2)],
-            // Wave 7-9: Add hunters
-            vec![(EnemyType::Pyramid, 3), (EnemyType::Spinner, 3), (EnemyType::Hunter, 2)],
-            // Wave 10+: Add guardians
-            vec![(EnemyType::Spinner, 2), (EnemyType::Hunter, 3), (EnemyType::Guardian, 2), (EnemyType::Pyramid, 2)],
+            // Wave 4-6: Add spinners and laser
+            vec![(EnemyType::Cube, 3), (EnemyType::Pyramid, 2), (EnemyType::Spinner, 2), (EnemyType::Laser, 1)],
+            // Wave 7-9: Add hunters, more lasers
+            vec![(EnemyType::Pyramid, 2), (EnemyType::Spinner, 2), (EnemyType::Hunter, 2), (EnemyType::Laser, 2)],
+            // Wave 10+: Add guardians, mixed composition
+            vec![(EnemyType::Spinner, 2), (EnemyType::Hunter, 2), (EnemyType::Guardian, 2), (EnemyType::Laser, 2), (EnemyType::Pyramid, 1)],
         ];
         
         let template_index = ((self.wave - 1) / 3).min(3) as usize;
         let template = &wave_templates[template_index];
+        
+        println!("Wave {} using template index {} with enemies:", self.wave, template_index);
+        for (enemy_type, count) in template {
+            println!("  - {:?} x{}", enemy_type, count);
+        }
         
         // Spawn different formations based on wave
         match self.wave % 4 {
@@ -228,6 +297,7 @@ impl Game {
                                 EnemyType::Spinner => 30,
                                 EnemyType::Hunter => 40,
                                 EnemyType::Guardian => 50,
+                                EnemyType::Laser => 60,
                             };
                         }
                     }
@@ -252,10 +322,38 @@ impl Game {
         // Check player-enemy collisions
         for (ei, enemy) in self.enemies.iter().enumerate() {
             let dist = (self.player.pos - enemy.pos).length();
-            if dist < 40.0 {
+            if dist < 40.0 && self.player_invulnerable_timer <= 0.0 {
                 enemies_to_remove.push(ei);
                 for _ in 0..20 {
                     self.particles.push(Particle::new(enemy.pos));
+                }
+                self.player_invulnerable_timer = 1.0; // 1 second of invulnerability
+            }
+            
+            // Check laser collision with player
+            if enemy.is_laser_active() && self.player_invulnerable_timer <= 0.0 {
+                let laser_end = enemy.get_laser_end_point();
+                
+                // Check if player intersects with laser line
+                // Using point-to-line distance calculation
+                let laser_vec = laser_end - enemy.pos;
+                let to_player = self.player.pos - enemy.pos;
+                
+                // Project player position onto laser line
+                let laser_length_sq = laser_vec.length_squared();
+                if laser_length_sq > 0.0 {
+                    let t = (to_player.dot(laser_vec) / laser_length_sq).clamp(0.0, 1.0);
+                    let closest_point = enemy.pos + laser_vec * t;
+                    let dist_to_laser = (self.player.pos - closest_point).length();
+                    
+                    // Laser has width of about 30 units
+                    if dist_to_laser < 30.0 {
+                        // Player hit by laser
+                        for _ in 0..15 {
+                            self.particles.push(Particle::new(self.player.pos));
+                        }
+                        self.player_invulnerable_timer = 2.0; // Longer invulnerability for laser hits
+                    }
                 }
             }
         }

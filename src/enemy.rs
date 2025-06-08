@@ -4,13 +4,14 @@ use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
 use std::f32::consts::PI;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EnemyType {
     Cube,      // Basic enemy that follows terrain
     Pyramid,   // Fast enemy that dives and climbs
     Spinner,   // Orbiting enemy with complex patterns
     Hunter,    // Tracks player position
     Guardian,  // Patrols specific areas
+    Laser,     // Enemy with sweeping laser attack
 }
 
 #[derive(Clone, Copy)]
@@ -28,17 +29,23 @@ pub struct Enemy {
     pub pos: Vec3,
     pub vel: Vec3,
     pub enemy_type: EnemyType,
-    rotation: Vec3,
-    rotation_speed: Vec3,
-    movement_pattern: MovementPattern,
-    spawn_point: Vec3,      // Remember where we spawned
-    target_point: Vec3,     // Where we're moving to
-    phase: f32,             // Animation phase for patterns
+    pub rotation: Vec3,
+    pub rotation_speed: Vec3,
+    pub movement_pattern: MovementPattern,
+    pub spawn_point: Vec3,      // Remember where we spawned
+    pub target_point: Vec3,     // Where we're moving to
+    pub phase: f32,             // Animation phase for patterns
     speed: f32,             // Base movement speed
     aggression: f32,        // How aggressive this enemy is (0-1)
     detection_range: f32,   // How far it can detect player
     attack_cooldown: f32,   // Time until next attack
     can_attack: bool,       // Whether this enemy type can attack
+    laser_active: bool,     // Whether laser is currently firing
+    laser_angle_h: f32,     // Current horizontal angle of laser sweep
+    laser_angle_v: f32,     // Current vertical angle of laser sweep
+    laser_target_angle_h: f32,// Target horizontal angle for laser sweep
+    laser_target_angle_v: f32,// Target vertical angle for laser sweep
+    laser_duration: f32,    // How long the laser has been active
 }
 
 // Calculate terrain height at a given position (matches shader calculation)
@@ -85,6 +92,7 @@ impl Enemy {
             EnemyType::Spinner => MovementPattern::Orbital,
             EnemyType::Hunter => MovementPattern::Tracking,
             EnemyType::Guardian => MovementPattern::Patrol,
+            EnemyType::Laser => MovementPattern::Hover,
         };
         
         // Set speed based on enemy type
@@ -94,6 +102,7 @@ impl Enemy {
             EnemyType::Spinner => rng.gen_range(100.0..140.0),
             EnemyType::Hunter => rng.gen_range(120.0..160.0),
             EnemyType::Guardian => rng.gen_range(60.0..90.0),
+            EnemyType::Laser => rng.gen_range(40.0..60.0),
         };
         
         // Set aggression and detection range
@@ -103,6 +112,7 @@ impl Enemy {
             EnemyType::Spinner => (0.5, 600.0),
             EnemyType::Hunter => (0.9, 1200.0),
             EnemyType::Guardian => (0.4, 400.0),
+            EnemyType::Laser => (0.6, 1000.0),
         };
         
         let spawn_point = Vec3::new(x, spawn_height, z);
@@ -126,6 +136,12 @@ impl Enemy {
             detection_range,
             attack_cooldown: 0.0,
             can_attack: matches!(enemy_type, EnemyType::Pyramid | EnemyType::Hunter | EnemyType::Guardian),
+            laser_active: false,
+            laser_angle_h: 0.0,
+            laser_angle_v: 0.0,
+            laser_target_angle_h: 0.0,
+            laser_target_angle_v: 0.0,
+            laser_duration: 0.0,
         }
     }
     
@@ -141,6 +157,10 @@ impl Enemy {
     }
     
     pub fn update_with_player(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        // Special handling for laser enemies
+        if self.enemy_type == EnemyType::Laser {
+            return self.update_laser_enemy(player_pos, dt);
+        }
         // Update rotation
         self.rotation += self.rotation_speed * dt;
         self.phase += dt;
@@ -322,6 +342,129 @@ impl Enemy {
         
         None
     }
+    
+    fn update_laser_enemy(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
+        // Update rotation and phase
+        self.rotation += self.rotation_speed * dt;
+        self.phase += dt;
+        
+        // Update attack cooldown
+        if self.attack_cooldown > 0.0 {
+            self.attack_cooldown -= dt;
+        }
+        
+        // Calculate distance to player
+        let to_player = player_pos - self.pos;
+        let distance_to_player = to_player.length();
+        
+        // Hover movement pattern with slow approach
+        let terrain_height = terrain_height_at(self.pos.x, self.pos.z);
+        let hover_height = terrain_height + 80.0 + (self.phase * 0.3).sin() * 20.0;
+        
+        // Smooth altitude adjustment
+        let height_diff = hover_height - self.pos.y;
+        self.vel.y = height_diff * 2.0;
+        
+        // Slowly move towards player if far away
+        if distance_to_player > 800.0 {
+            let horizontal = Vec3::new(to_player.x, 0.0, to_player.z).normalize_or_zero();
+            self.vel.x = horizontal.x * self.speed * 0.5;
+            self.vel.z = horizontal.z * self.speed * 0.5;
+        } else {
+            // Gentle circling when close
+            let orbit_angle = self.phase * 0.2;
+            self.vel.x = orbit_angle.cos() * self.speed * 0.3;
+            self.vel.z = orbit_angle.sin() * self.speed * 0.3;
+        }
+        
+        // Update position
+        self.pos += self.vel * dt;
+        
+        // Ensure enemy doesn't go below terrain
+        if self.pos.y < terrain_height + 10.0 {
+            self.pos.y = terrain_height + 10.0;
+            self.vel.y = self.vel.y.max(0.0);
+        }
+        
+        // Handle laser attack
+        if self.laser_active {
+            // Update laser sweep
+            self.laser_duration += dt;
+            
+            // Sweep towards target angles in both horizontal and vertical
+            let angle_diff_h = self.laser_target_angle_h - self.laser_angle_h;
+            let angle_diff_v = self.laser_target_angle_v - self.laser_angle_v;
+            let sweep_speed = 0.8; // Radians per second - slow enough to dodge
+            
+            // Smooth interpolation towards target
+            self.laser_angle_h += angle_diff_h.signum() * sweep_speed * dt;
+            self.laser_angle_v += angle_diff_v.signum() * sweep_speed * dt;
+            
+            // Check if laser sweep is complete
+            if self.laser_duration > 3.0 || (angle_diff_h.abs() < 0.1 && angle_diff_v.abs() < 0.1) {
+                self.laser_active = false;
+                self.attack_cooldown = 4.0; // Long cooldown between laser attacks
+                println!("Laser deactivated after {} seconds", self.laser_duration);
+            }
+        } else if distance_to_player < self.detection_range && self.attack_cooldown <= 0.0 {
+            // Start a new laser attack with higher chance
+            if rand::random::<f32>() < 0.05 * self.aggression { // Increased from 0.02
+                self.laser_active = true;
+                self.laser_duration = 0.0;
+                
+                // Calculate 3D angles to player
+                let horizontal_dist = (to_player.x * to_player.x + to_player.z * to_player.z).sqrt();
+                let angle_to_player_h = to_player.z.atan2(to_player.x);
+                let angle_to_player_v = to_player.y.atan2(horizontal_dist);
+                
+                // Start laser pointing away from player, will sweep towards them
+                // Add some randomness to starting position
+                let start_offset_h = if rand::random::<bool>() { -1.2 } else { 1.2 };
+                let start_offset_v = rand::random::<f32>() - 0.5;  // Range -0.5 to 0.5
+                
+                self.laser_angle_h = angle_to_player_h + start_offset_h;
+                self.laser_angle_v = angle_to_player_v + start_offset_v;
+                
+                // Target slightly past the player for a sweeping motion
+                self.laser_target_angle_h = angle_to_player_h + start_offset_h * -0.3;
+                self.laser_target_angle_v = angle_to_player_v - start_offset_v * 0.5;
+                
+                println!("Laser activated! Distance: {:.1}, H-Angle: {:.2}, V-Angle: {:.2}", 
+                         distance_to_player, self.laser_angle_h, self.laser_angle_v);
+            }
+        }
+        
+        None // Laser enemies don't shoot bullets
+    }
+    
+    pub fn is_laser_active(&self) -> bool {
+        self.laser_active
+    }
+    
+    pub fn get_laser_end_point(&self) -> Vec3 {
+        // Calculate laser end point based on current horizontal and vertical angles
+        let laser_length = 1500.0;
+        
+        // Convert spherical coordinates to Cartesian
+        let horizontal_component = self.laser_angle_v.cos() * laser_length;
+        let vertical_component = self.laser_angle_v.sin() * laser_length;
+        
+        let end_x = self.pos.x + self.laser_angle_h.cos() * horizontal_component;
+        let end_z = self.pos.z + self.laser_angle_h.sin() * horizontal_component;
+        let end_y = self.pos.y + vertical_component;
+        
+        Vec3::new(end_x, end_y, end_z)
+    }
+    
+    pub fn get_laser_info(&self) -> Option<(Vec3, Vec3)> {
+        if self.laser_active {
+            let start = self.pos - Vec3::new(0.0, 20.0, 0.0);
+            let end = self.get_laser_end_point();
+            Some((start, end))
+        } else {
+            None
+        }
+    }
 }
 
 impl Drawable for Enemy {
@@ -330,31 +473,59 @@ impl Drawable for Enemy {
         
         match self.enemy_type {
             EnemyType::Cube => {
+                // Basic enemy - simple cube with decorative elements
                 renderer.draw_cube(self.pos, 40.0, rotation);
+                // Add smaller rotating cube inside
+                let inner_rotation = rotation_matrix(self.rotation.y * -2.0, self.rotation.x * -2.0, 0.0);
+                renderer.draw_cube(self.pos, 20.0, inner_rotation);
             }
             EnemyType::Pyramid => {
-                renderer.draw_pyramid(self.pos, 45.0, rotation);
+                // Aggressive enemy - sharp double pyramid (octahedron)
+                renderer.draw_octahedron(self.pos, 35.0, rotation);
+                // Add spinning blades
+                let blade_rotation = rotation_matrix(self.phase * 4.0, 0.0, 0.0);
+                renderer.draw_pyramid(self.pos, 25.0, blade_rotation);
             }
             EnemyType::Spinner => {
-                renderer.draw_cube(self.pos, 30.0, rotation);
-                let rotation2 = rotation_matrix(
-                    -self.rotation.y * 2.0,
-                    -self.rotation.x * 2.0,
-                    self.rotation.z
-                );
-                renderer.draw_pyramid(self.pos, 35.0, rotation2);
+                // Orbital enemy - complex spinning structure
+                // Central octahedron
+                renderer.draw_octahedron(self.pos, 25.0, rotation);
+                // Three rotating rings
+                let ring1 = rotation_matrix(self.rotation.y * 2.0, 0.0, 0.0);
+                let ring2 = rotation_matrix(0.0, self.rotation.x * 2.0, 0.0);
+                let ring3 = rotation_matrix(0.0, 0.0, self.rotation.z * 2.0);
+                renderer.draw_cube(self.pos, 35.0, ring1);
+                renderer.draw_cube(self.pos, 30.0, ring2);
+                renderer.draw_cube(self.pos, 25.0, ring3);
             }
             EnemyType::Hunter => {
-                // Draw a menacing diamond shape
-                renderer.draw_pyramid(self.pos + Vec3::new(0.0, 20.0, 0.0), 30.0, rotation);
-                let rotation2 = rotation_matrix(self.rotation.y, self.rotation.x + PI, self.rotation.z);
-                renderer.draw_pyramid(self.pos - Vec3::new(0.0, 20.0, 0.0), 30.0, rotation2);
+                // Tracking enemy - spike ball design
+                renderer.draw_spike_ball(self.pos, 25.0, 20.0, rotation);
+                // Add pulsing core
+                let pulse = (self.phase * 3.0).sin() * 0.2 + 0.8;
+                let core_rotation = rotation_matrix(self.rotation.y * -1.0, self.rotation.x * -1.0, 0.0);
+                renderer.draw_octahedron(self.pos, 15.0 * pulse, core_rotation);
             }
             EnemyType::Guardian => {
-                // Draw a fortress-like shape
-                renderer.draw_cube(self.pos, 50.0, rotation);
-                let rotation2 = rotation_matrix(self.rotation.y + PI/4.0, 0.0, 0.0);
-                renderer.draw_cube(self.pos, 35.0, rotation2);
+                // Defensive enemy - hexagonal fortress
+                renderer.draw_hexagon_prism(self.pos, 40.0, 30.0, rotation);
+                // Add rotating shields
+                let shield_rotation = rotation_matrix(self.phase * 0.5, 0.0, 0.0);
+                renderer.draw_hexagon_prism(self.pos, 50.0, 15.0, shield_rotation);
+                // Central core
+                renderer.draw_octahedron(self.pos, 20.0, rotation);
+            }
+            EnemyType::Laser => {
+                // Laser enemy - high-tech appearance
+                renderer.draw_hexagon_prism(self.pos, 35.0, 40.0, rotation);
+                // Add energy core that glows when laser is active
+                let energy_scale = if self.laser_active { 1.5 } else { 1.0 };
+                let core_rotation = rotation_matrix(self.phase * 5.0, self.phase * 3.0, 0.0);
+                renderer.draw_octahedron(self.pos, 20.0 * energy_scale, core_rotation);
+                // Rotating rings
+                let ring_rotation = rotation_matrix(self.rotation.y * 3.0, self.rotation.x * 2.0, 0.0);
+                renderer.draw_cube(self.pos + Vec3::new(0.0, 20.0, 0.0), 25.0, ring_rotation);
+                renderer.draw_cube(self.pos - Vec3::new(0.0, 20.0, 0.0), 25.0, ring_rotation);
             }
         }
     }
