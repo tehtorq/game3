@@ -94,7 +94,82 @@
   - [ ] Supply convoys
   - [ ] Interceptable formations
 
-## 4. Terrain Interaction
+## 4. Terrain Diversity & World Interactivity
+
+### Terrain Diversity Enhancements
+- [ ] **Biome-Based Terrain Generation**
+  - [ ] Add distinct biome regions (canyons, plateaus, crystalline, volcanic)
+  - [ ] Implement smooth transitions using noise-based blending
+  - [ ] Color-code regions (blue ice fields, orange volcanic, purple crystal)
+  - [ ] Biome-specific height generation functions
+
+- [ ] **Dynamic Terrain Features**
+  - [ ] Canyon Networks - winding trenches for cover and chase sequences
+  - [ ] Floating Rock Islands - moving platforms with patterns
+  - [ ] Energy Geysers - periodic eruptions for altitude boosts
+  - [ ] Magnetic Anomalies - affect bullet trajectories
+
+### Environmental Objectives
+- [ ] **Crystal Harvesting Points**
+  - [ ] Glowing formations requiring hover to extract
+  - [ ] Energy crystal resource system
+  - [ ] Visual extraction effects
+
+- [ ] **Ancient Sensor Arrays**
+  - [ ] Reactivatable structures
+  - [ ] Reveal hidden bases/caches
+  - [ ] Puzzle-like activation sequences
+
+- [ ] **Fuel Refineries**
+  - [ ] Capturable structures
+  - [ ] Afterburner regeneration bonuses
+  - [ ] Territory control mechanics
+
+- [ ] **Shield Generators**
+  - [ ] Environmental safe zones
+  - [ ] Activation requirements
+  - [ ] Temporary protection areas
+
+### Living Ecosystem
+- [ ] **Wildlife System**
+  - [ ] Non-hostile creatures
+  - [ ] Flee from combat behavior
+  - [ ] Ambient movement patterns
+
+- [ ] **Weather Systems**
+  - [ ] Fog banks with visibility reduction
+  - [ ] Wind streams for faster travel
+  - [ ] Lightning storms damaging shields
+  - [ ] Weather transitions
+
+- [ ] **Day/Night Cycle**
+  - [ ] Affects enemy behavior
+  - [ ] Visibility changes
+  - [ ] Nocturnal enemy types
+
+- [ ] **Environmental Storytelling**
+  - [ ] Crashed ships
+  - [ ] Abandoned bases
+  - [ ] Ancient ruins with lore
+
+### Terrain-Based Gameplay
+- [ ] **Ambush Valleys**
+  - [ ] Narrow passages with enemy traps
+  - [ ] Strategic bottlenecks
+  
+- [ ] **Thermal Columns**
+  - [ ] Rising air currents over hot zones
+  - [ ] Free altitude gain mechanics
+
+- [ ] **Echo Chambers**
+  - [ ] Amplified weapon sound radius
+  - [ ] Strategic stealth considerations
+
+- [ ] **Natural Fortresses**
+  - [ ] Rock formations for defensive positions
+  - [ ] Cover-based combat opportunities
+
+### Original Terrain Interaction Ideas
 - [ ] **Canyon Flying**
   - [ ] Narrow passage generation
   - [ ] Collision detection improvements
@@ -112,12 +187,6 @@
   - [ ] Chain reactions
   - [ ] Strategic destruction
   - [ ] Debris physics
-
-- [ ] **Weather Effects**
-  - [ ] Fog system with visibility reduction
-  - [ ] Wind forces at altitude
-  - [ ] Lightning storms
-  - [ ] Weather transitions
 
 - [ ] **Landmarks**
   - [ ] Unique terrain features

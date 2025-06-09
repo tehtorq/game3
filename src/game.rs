@@ -499,7 +499,7 @@ impl Game {
             if matches!(bullet.bullet_type, BulletType::Player) {
                 let mut hit_something = false;
                 
-                for (base_idx, base) in self.bases.iter_mut().enumerate() {
+                for (_base_idx, base) in self.bases.iter_mut().enumerate() {
                     if base.is_active {
                         // Check main base collision
                         let dist = (bullet.pos - base.pos).length();

@@ -1,12 +1,15 @@
 use miniquad::*;
 use glam::{Vec3, Mat4};
 use std::f32::consts::PI;
+use clap::{Parser, Subcommand};
 
 mod math;
 mod vertex;
 mod renderer;
 mod terrain;
 mod terrain_instanced;
+mod terrain_cache;
+mod biome;
 mod player;
 mod enemy;
 mod bullet;
@@ -27,6 +30,37 @@ use hud::HUD;
 use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
+use terrain_cache::TerrainCache;
+use rand::Rng;
+
+#[derive(Parser)]
+#[command(name = "vector_shooter")]
+#[command(about = "A retro vector graphics space shooter", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Create a new terrain with the given name
+    Create { 
+        /// Name for the terrain
+        name: String,
+        /// Random seed (optional)
+        #[arg(short, long)]
+        seed: Option<u32>,
+    },
+    /// Load an existing terrain
+    Load { 
+        /// Name of the terrain to load
+        name: String 
+    },
+    /// List all cached terrains
+    List,
+    /// Play with default terrain (no caching)
+    Play,
+}
 
 // Default screen dimensions are now dynamically calculated at 75% of monitor size
 
@@ -42,6 +76,7 @@ struct Stage {
     input: InputState,
     paused: bool,
     instanced_terrain: Option<InstancedTerrain>,
+    terrain_config: TerrainConfig,
     hud: HUD,
     // FPS tracking fields
     frame_count: u32,
@@ -49,6 +84,20 @@ struct Stage {
     last_frame_time: f64,
     // Fullscreen state
     fullscreen: bool,
+}
+
+#[derive(Clone)]
+struct TerrainConfig {
+    mode: TerrainMode,
+    name: Option<String>,
+    seed: Option<u32>,
+}
+
+#[derive(Clone, PartialEq)]
+enum TerrainMode {
+    Create,
+    Load,
+    Default,
 }
 
 #[derive(Default)]
@@ -62,7 +111,7 @@ struct InputState {
 }
 
 impl Stage {
-    fn new() -> Self {
+    fn new(terrain_config: TerrainConfig) -> Self {
         let mut ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
         
         let shader = ctx.new_shader(
@@ -190,6 +239,7 @@ impl Stage {
             input: InputState::default(),
             paused: false,
             instanced_terrain: None,
+            terrain_config,
             hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
@@ -244,13 +294,43 @@ impl EventHandler for Stage {
             println!("Initializing instanced terrain...");
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                let terrain = InstancedTerrain::new(&mut *ctx_ptr, 160); // 32x original view distance
+                let terrain = match self.terrain_config.mode {
+                    TerrainMode::Load => {
+                        if let Some(ref name) = self.terrain_config.name {
+                            match TerrainCache::load_terrain_textures(name) {
+                                Ok((height_data, biome_data, size)) => {
+                                    InstancedTerrain::new_from_cache(&mut *ctx_ptr, 160, height_data, biome_data, size)
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to load terrain '{}': {}", name, e);
+                                    eprintln!("Falling back to default terrain");
+                                    InstancedTerrain::new(&mut *ctx_ptr, 160)
+                                }
+                            }
+                        } else {
+                            InstancedTerrain::new(&mut *ctx_ptr, 160)
+                        }
+                    }
+                    TerrainMode::Create => {
+                        let seed = self.terrain_config.seed.unwrap_or(rand::random());
+                        println!("Creating terrain with seed: {}", seed);
+                        InstancedTerrain::new_with_seed_and_save(
+                            &mut *ctx_ptr, 
+                            160, 
+                            seed,
+                            self.terrain_config.name.as_deref()
+                        )
+                    }
+                    TerrainMode::Default => {
+                        InstancedTerrain::new(&mut *ctx_ptr, 160)
+                    }
+                };
                 
                 // Create terrain bindings
                 self.terrain_bindings = Bindings {
                     vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
                     index_buffer: terrain.index_buffer(),
-                    images: vec![],
+                    images: vec![terrain.biome_texture()],
                 };
                 
                 println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
@@ -915,6 +995,59 @@ fn main() {
         eprintln!("==================\n");
     }));
     
+    // Parse command line arguments
+    let cli = Cli::parse();
+    
+    let terrain_config = match cli.command {
+        Some(Commands::List) => {
+            println!("Cached terrains:");
+            let terrains = TerrainCache::list_cached_terrains();
+            if terrains.is_empty() {
+                println!("  No cached terrains found");
+            } else {
+                for terrain in terrains {
+                    println!("  - {}", terrain);
+                }
+            }
+            return;
+        }
+        Some(Commands::Create { name, seed }) => {
+            println!("Creating new terrain '{}'", name);
+            if TerrainCache::exists(&name) {
+                eprintln!("Warning: Terrain '{}' already exists and will be overwritten", name);
+            }
+            TerrainConfig {
+                mode: TerrainMode::Create,
+                name: Some(name),
+                seed,
+            }
+        }
+        Some(Commands::Load { name }) => {
+            if !TerrainCache::exists(&name) {
+                eprintln!("Error: Terrain '{}' not found", name);
+                eprintln!("Available terrains:");
+                for terrain in TerrainCache::list_cached_terrains() {
+                    eprintln!("  - {}", terrain);
+                }
+                return;
+            }
+            println!("Loading terrain '{}'", name);
+            TerrainConfig {
+                mode: TerrainMode::Load,
+                name: Some(name),
+                seed: None,
+            }
+        }
+        Some(Commands::Play) | None => {
+            println!("Playing with default terrain (no caching)");
+            TerrainConfig {
+                mode: TerrainMode::Default,
+                name: None,
+                seed: None,
+            }
+        }
+    };
+    
     // Default window size - 75% will be calculated after window creation
     // Using 1200x900 as a reasonable default (75% of 1600x1200)
     let window_width = 1200;
@@ -927,6 +1060,6 @@ fn main() {
             window_height,
             ..Default::default()
         },
-        || Box::new(Stage::new()),
+        move || Box::new(Stage::new(terrain_config)),
     );
 }
