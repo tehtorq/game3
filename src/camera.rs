@@ -1,5 +1,6 @@
 use glam::{Vec3, Mat4};
 use crate::player::Player;
+use crate::constants::*;
 
 pub struct Camera {
     pub distance: f32,
@@ -9,8 +10,8 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
-            distance: 150.0,
-            height: 80.0,
+            distance: CAMERA_DISTANCE,
+            height: CAMERA_HEIGHT,
         }
     }
 
@@ -32,6 +33,6 @@ impl Camera {
 
     pub fn get_projection_matrix(&self, aspect: f32) -> Mat4 {
         // Use left-handed projection (this worked)
-        Mat4::perspective_lh(60.0f32.to_radians(), aspect, 1.0, 10000.0)  // Increased far plane
+        Mat4::perspective_lh(CAMERA_FOV.to_radians(), aspect, CAMERA_NEAR, CAMERA_FAR)
     }
 }

@@ -239,9 +239,36 @@ impl BiomeMap {
         // Sort by distance
         distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         
-        // Take the 3 closest biomes for blending
+        // Take the 4 closest biomes for better blending
         let mut weights = Vec::new();
-        if distances.len() >= 3 {
+        if distances.len() >= 4 {
+            let blend_distance = 300.0; // Distance over which biomes blend
+            
+            // Use smooth falloff function for more natural transitions
+            let mut raw_weights = Vec::new();
+            for i in 0..4 {
+                let distance = distances[i].1;
+                // Smooth step function for gradual transitions
+                let t = (distance / blend_distance).clamp(0.0, 1.0);
+                let weight = 1.0 - t * t * (3.0 - 2.0 * t); // Smoothstep
+                raw_weights.push((distances[i].0, weight));
+            }
+            
+            // Normalize weights
+            let total: f32 = raw_weights.iter().map(|(_, w)| w).sum();
+            if total > 0.0 {
+                for (biome, weight) in raw_weights {
+                    if weight > 0.01 { // Only include significant weights
+                        weights.push((biome, weight / total));
+                    }
+                }
+            }
+            
+            // If we ended up with no significant weights, use closest biome
+            if weights.is_empty() {
+                weights.push((distances[0].0, 1.0));
+            }
+        } else if distances.len() >= 3 {
             let d1 = distances[0].1;
             let d2 = distances[1].1;
             let d3 = distances[2].1;

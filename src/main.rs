@@ -21,6 +21,7 @@ mod base;
 mod camera;
 mod shader;
 mod game;
+mod constants;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
@@ -31,7 +32,7 @@ use camera::Camera;
 use game::Game;
 use terrain_instanced::InstancedTerrain;
 use terrain_cache::TerrainCache;
-use rand::Rng;
+use constants::*;
 
 #[derive(Parser)]
 #[command(name = "vector_shooter")]
@@ -122,13 +123,23 @@ impl Stage {
             shader::meta()
         ).unwrap();
         
-        let terrain_shader = ctx.new_shader(
+        println!("Creating terrain shader...");
+        let terrain_shader = match ctx.new_shader(
             ShaderSource::Glsl {
                 vertex: shader::VERTEX_INSTANCED_TERRAIN,
                 fragment: shader::FRAGMENT_TERRAIN,
             },
             shader::meta_terrain()
-        ).unwrap();
+        ) {
+            Ok(shader) => {
+                println!("Terrain shader created successfully");
+                shader
+            }
+            Err(e) => {
+                eprintln!("Failed to create terrain shader: {:?}", e);
+                panic!("Shader compilation failed");
+            }
+        };
         
         let line_pipeline = ctx.new_pipeline(
             &[BufferLayout {
@@ -201,12 +212,12 @@ impl Stage {
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<Vertex>(2000000)
+            BufferSource::empty::<Vertex>(MAX_VERTICES)
         );
         let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<u32>(4000000)
+            BufferSource::empty::<u32>(MAX_INDICES)
         );
         
         let bindings = Bindings {
@@ -282,7 +293,7 @@ impl EventHandler for Stage {
         self.fps_timer += delta_time;
         
         // Print FPS once per second
-        if self.fps_timer >= 1.0 {
+        if self.fps_timer >= 1.0 && SHOW_FPS {
             let fps = self.frame_count as f64 / self.fps_timer;
             println!("FPS: {:.1}", fps);
             self.frame_count = 0;
@@ -299,16 +310,16 @@ impl EventHandler for Stage {
                         if let Some(ref name) = self.terrain_config.name {
                             match TerrainCache::load_terrain_textures(name) {
                                 Ok((height_data, biome_data, size)) => {
-                                    InstancedTerrain::new_from_cache(&mut *ctx_ptr, 160, height_data, biome_data, size)
+                                    InstancedTerrain::new_from_cache(&mut *ctx_ptr, VIEW_DISTANCE, height_data, biome_data, size)
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to load terrain '{}': {}", name, e);
                                     eprintln!("Falling back to default terrain");
-                                    InstancedTerrain::new(&mut *ctx_ptr, 160)
+                                    InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                                 }
                             }
                         } else {
-                            InstancedTerrain::new(&mut *ctx_ptr, 160)
+                            InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                         }
                     }
                     TerrainMode::Create => {
@@ -316,13 +327,13 @@ impl EventHandler for Stage {
                         println!("Creating terrain with seed: {}", seed);
                         InstancedTerrain::new_with_seed_and_save(
                             &mut *ctx_ptr, 
-                            160, 
+                            VIEW_DISTANCE, 
                             seed,
                             self.terrain_config.name.as_deref()
                         )
                     }
                     TerrainMode::Default => {
-                        InstancedTerrain::new(&mut *ctx_ptr, 160)
+                        InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                     }
                 };
                 
@@ -330,7 +341,7 @@ impl EventHandler for Stage {
                 self.terrain_bindings = Bindings {
                     vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
                     index_buffer: terrain.index_buffer(),
-                    images: vec![terrain.biome_texture()],
+                    images: vec![terrain.height_texture(), terrain.biome_texture()],
                 };
                 
                 println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
@@ -354,9 +365,14 @@ impl EventHandler for Stage {
         });
         
         // Draw instanced terrain
-        if let Some(terrain) = &self.instanced_terrain {
-            // Drawing terrain
+        if let Some(terrain) = &mut self.instanced_terrain {
+            // Update terrain chunks to be centered around player
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            unsafe {
+                terrain.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
+            }
             
+            // Drawing terrain
             self.ctx.apply_pipeline(&self.terrain_pipeline);
             self.ctx.apply_bindings(&self.terrain_bindings);
             self.ctx.apply_uniforms(UniformsSource::table(&shader::UniformsTerrain::new(
@@ -656,9 +672,11 @@ impl EventHandler for Stage {
             renderer.set_mode(RenderMode::Lines);
             
             // Draw debug cross
-            renderer.draw_line(Vec3::new(-100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
-            renderer.draw_line(Vec3::new(0.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0));
-            renderer.draw_line(Vec3::new(0.0, 0.0, -100.0), Vec3::new(0.0, 0.0, 100.0));
+            if SHOW_DEBUG_CROSS {
+                renderer.draw_line(Vec3::new(-DEBUG_CROSS_SIZE, 0.0, 0.0), Vec3::new(DEBUG_CROSS_SIZE, 0.0, 0.0));
+                renderer.draw_line(Vec3::new(0.0, -DEBUG_CROSS_SIZE, 0.0), Vec3::new(0.0, DEBUG_CROSS_SIZE, 0.0));
+                renderer.draw_line(Vec3::new(0.0, 0.0, -DEBUG_CROSS_SIZE), Vec3::new(0.0, 0.0, DEBUG_CROSS_SIZE));
+            }
             
             // Draw player bullets
             for bullet in &self.game.bullets {
@@ -1048,10 +1066,9 @@ fn main() {
         }
     };
     
-    // Default window size - 75% will be calculated after window creation
-    // Using 1200x900 as a reasonable default (75% of 1600x1200)
-    let window_width = 1200;
-    let window_height = 900;
+    // Default window size
+    let window_width = WINDOW_WIDTH;
+    let window_height = WINDOW_HEIGHT;
     
     miniquad::start(
         conf::Conf {
