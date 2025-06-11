@@ -180,24 +180,18 @@ impl Stage {
             },
         );
         
-        // Create terrain pipeline with instancing
+        // Create terrain pipeline without instancing
         let terrain_pipeline = ctx.new_pipeline(
             &[
                 BufferLayout {
                     step_func: VertexStep::PerVertex,
                     stride: 24, // 6 floats * 4 bytes
                     ..Default::default()
-                },
-                BufferLayout {
-                    step_func: VertexStep::PerInstance,
-                    stride: 8, // 2 floats * 4 bytes for instance offset
-                    ..Default::default()
                 }
             ],
             &[
                 VertexAttribute::new("pos", VertexFormat::Float3),
                 VertexAttribute::new("barycentric", VertexFormat::Float3),
-                VertexAttribute::with_buffer("instance_offset", VertexFormat::Float2, 1),
             ],
             terrain_shader,
             PipelineParams {
@@ -278,7 +272,8 @@ impl EventHandler for Stage {
                 self.input.down,
                 self.input.shoot,
                 self.input.boost,
-                dt
+                dt,
+                self.instanced_terrain.as_ref()
             );
         }
     }
@@ -339,7 +334,7 @@ impl EventHandler for Stage {
                 
                 // Create terrain bindings
                 self.terrain_bindings = Bindings {
-                    vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
+                    vertex_buffers: vec![terrain.vertex_buffer()],
                     index_buffer: terrain.index_buffer(),
                     images: vec![terrain.height_texture(), terrain.biome_texture()],
                 };
@@ -347,6 +342,9 @@ impl EventHandler for Stage {
                 println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
                 
                 self.instanced_terrain = Some(terrain);
+                
+                // Initialize game with terrain
+                self.game.initialize_with_terrain(self.instanced_terrain.as_ref());
             }
         }
         
@@ -382,8 +380,9 @@ impl EventHandler for Stage {
                 0.0 // terrain_y_base - start at Y=0
             )));
             
-            // Draw all terrain instances
-            self.ctx.draw(0, terrain.index_count(), terrain.instance_count());
+            // Draw all terrain indices
+            let indices_count = terrain.index_count();
+            self.ctx.draw(0, indices_count, 1);
         }
         
         // Draw bases first (in red/orange)
@@ -937,7 +936,7 @@ impl EventHandler for Stage {
             renderer.set_mode(RenderMode::Lines);
             
             let (width, height) = window::screen_size();
-            self.hud.draw(&mut renderer, &self.game, width, height);
+            self.hud.draw(&mut renderer, &self.game, width, height, self.instanced_terrain.as_ref());
         }
         
         if !vertices.is_empty() {

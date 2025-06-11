@@ -1,5 +1,7 @@
 use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
+use crate::terrain::terrain_height_fallback;
+use crate::terrain_instanced::InstancedTerrain;
 use rand::prelude::*;
 use std::f32::consts::PI;
 
@@ -44,7 +46,15 @@ pub struct GroundTurret {
 
 impl Base {
     pub fn new(x: f32, z: f32, base_type: BaseType) -> Self {
-        let y = terrain_height_at(x, z) + 20.0; // Place base slightly above terrain
+        Self::new_with_terrain(x, z, base_type, None)
+    }
+    
+    pub fn new_with_terrain(x: f32, z: f32, base_type: BaseType, terrain: Option<&InstancedTerrain>) -> Self {
+        let y = if let Some(t) = terrain {
+            t.get_height_at(x, z)
+        } else {
+            terrain_height_fallback(x, z)
+        } + 20.0; // Place base slightly above terrain
         let pos = Vec3::new(x, y, z);
         
         // Create turrets based on base type
@@ -95,7 +105,11 @@ impl Base {
             let angle = i as f32 * PI * 2.0 / ground_turret_count as f32;
             let turret_x = x + angle.cos() * ground_turret_radius;
             let turret_z = z + angle.sin() * ground_turret_radius;
-            let turret_y = terrain_height_at(turret_x, turret_z) + 5.0; // Lower to ground
+            let turret_y = if let Some(t) = terrain {
+                t.get_height_at(turret_x, turret_z)
+            } else {
+                terrain_height_fallback(turret_x, turret_z)
+            } + 5.0; // Lower to ground
             
             ground_turrets.push(GroundTurret {
                 pos: Vec3::new(turret_x, turret_y, turret_z),
@@ -298,7 +312,7 @@ impl Base {
                 let current_angle = angle + angle_variation;
                 let x = self.pos.x + current_angle.cos() * distance;
                 let z = self.pos.z + current_angle.sin() * distance;
-                let y = terrain_height_at(x, z) + 100.0 + (j as f32 * 30.0);
+                let y = terrain_height_fallback(x, z) + 100.0 + (j as f32 * 30.0);
                 waypoints.push(Vec3::new(x, y, z));
             }
             
@@ -502,34 +516,6 @@ impl Drawable for Base {
     }
 }
 
-// Helper function to calculate terrain height
-fn terrain_height_at(x: f32, z: f32) -> f32 {
-    let base_y = 20.0;
-    
-    // Large-scale terrain features
-    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
-    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
-    
-    // Gentle slopes
-    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
-    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
-    
-    // Roughness
-    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
-    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
-    roughness = (roughness + 1.5) / 3.0;
-    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
-    
-    // Bumpy details
-    let mut bumps = 0.0;
-    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
-    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
-    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
-    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
-    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
-    
-    base_y + large_scale + gentle + (bumps * roughness)
-}
 
 // Helper function to calculate angle difference
 fn angle_difference(a: f32, b: f32) -> f32 {

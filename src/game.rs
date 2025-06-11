@@ -4,35 +4,8 @@ use std::f32::consts::PI;
 use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
 use crate::mine::Mine;
-
-// Calculate terrain height at a given position (matches shader calculation)
-fn terrain_height_at(x: f32, z: f32) -> f32 {
-    let base_y = 20.0;
-    
-    // Large-scale terrain features
-    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
-    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
-    
-    // Gentle slopes
-    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
-    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
-    
-    // Roughness
-    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
-    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
-    roughness = (roughness + 1.5) / 3.0;
-    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
-    
-    // Bumpy details
-    let mut bumps = 0.0;
-    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
-    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
-    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
-    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
-    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
-    
-    base_y + large_scale + gentle + (bumps * roughness)
-}
+use crate::terrain_instanced::InstancedTerrain;
+use crate::terrain::terrain_height_fallback;
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::Particle;
 use crate::renderer::Renderer;
@@ -73,15 +46,19 @@ impl Game {
             player_slow_timer: 0.0,
         };
         
-        // Generate initial bases around the map
-        game.generate_bases();
-        
+        // Note: Initial bases will be generated when terrain is available
         game
     }
+    
+    pub fn initialize_with_terrain(&mut self, terrain: Option<&InstancedTerrain>) {
+        if self.bases.is_empty() {
+            self.generate_bases(terrain);
+        }
+    }
 
-    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, boost: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, boost: bool, dt: f32, terrain: Option<&InstancedTerrain>) {
         // Update player (slow effect would need to be implemented in player.rs)
-        self.player.update(left, right, up, down, boost, dt);
+        self.player.update(left, right, up, down, boost, dt, terrain);
         
         // Update timers
         if self.player_invulnerable_timer > 0.0 {
@@ -125,7 +102,7 @@ impl Game {
             let enemy_types = self.bases[base_index].get_spawn_types();
             let routes = self.bases[base_index].get_patrol_routes();
             
-            self.spawn_enemies_from_base_data(base_pos, enemy_types, routes);
+            self.spawn_enemies_from_base_data(base_pos, enemy_types, routes, terrain);
         }
         
         // Create bullets from base turrets
@@ -225,7 +202,11 @@ impl Game {
             bullet.update(dt);
             
             // Check if bullet hit terrain
-            let terrain_height = terrain_height_at(bullet.pos.x, bullet.pos.z);
+            let terrain_height = if let Some(terrain) = terrain {
+                terrain.get_height_at(bullet.pos.x, bullet.pos.z)
+            } else {
+                terrain_height_fallback(bullet.pos.x, bullet.pos.z)
+            };
             if bullet.pos.y < terrain_height {
                 terrain_hits.push((i, bullet.pos));
             }
@@ -269,7 +250,7 @@ impl Game {
         if self.enemy_spawn_timer <= 0.0 {
             self.wave += 1;  // Increment wave counter
             println!("Wave {} - Adding new bases", self.wave);
-            self.add_wave_bases();
+            self.add_wave_bases(terrain);
             // Spawn intervals: 30-60 seconds between new bases
             self.enemy_spawn_timer = (40.0 - (self.wave as f32 * 2.0)).max(20.0); // Much faster base spawning
         }
@@ -368,7 +349,7 @@ impl Game {
     }
     */
 
-    fn generate_bases(&mut self) {
+    fn generate_bases(&mut self, terrain: Option<&InstancedTerrain>) {
         let mut rng = thread_rng();
         
         // Map is approximately 51,360 x 51,360 units (terrain scale from view_distance=160)
@@ -419,13 +400,13 @@ impl Game {
             let x = x.clamp(-MAP_SIZE * 0.9, MAP_SIZE * 0.9);
             let z = z.clamp(-MAP_SIZE * 0.9, MAP_SIZE * 0.9);
             
-            self.bases.push(Base::new(x, z, *base_type));
+            self.bases.push(Base::new_with_terrain(x, z, *base_type, terrain));
         }
         
         println!("Generated {} initial bases across {}x{} unit map", self.bases.len(), MAP_SIZE * 2.0, MAP_SIZE * 2.0);
     }
     
-    fn add_wave_bases(&mut self) {
+    fn add_wave_bases(&mut self, terrain: Option<&InstancedTerrain>) {
         let mut rng = thread_rng();
         
         const MAP_SIZE: f32 = 50000.0;
@@ -450,7 +431,7 @@ impl Game {
                 _ => if rng.gen_bool(0.3) { BaseType::Fortress } else { BaseType::Large },
             };
             
-            self.bases.push(Base::new(x, z, base_type));
+            self.bases.push(Base::new_with_terrain(x, z, base_type, terrain));
             println!("Added new {} base at ({:.0}, {:.0})", 
                 match base_type {
                     BaseType::Small => "Small",
@@ -461,7 +442,7 @@ impl Game {
         }
     }
     
-    fn spawn_enemies_from_base_data(&mut self, base_pos: Vec3, enemy_types: Vec<EnemyType>, routes: Vec<Vec<Vec3>>) {
+    fn spawn_enemies_from_base_data(&mut self, base_pos: Vec3, enemy_types: Vec<EnemyType>, routes: Vec<Vec<Vec3>>, terrain: Option<&InstancedTerrain>) {
         let mut rng = thread_rng();
         
         // Spawn 5-8 enemies per spawn cycle - much more aggressive
@@ -474,7 +455,7 @@ impl Game {
                 let spawn_offset = Vec3::new(angle.cos() * 100.0, 50.0, angle.sin() * 100.0);
                 let spawn_pos = base_pos + spawn_offset;
                 
-                let mut enemy = Enemy::new(spawn_pos.x, spawn_pos.z, *enemy_type);
+                let mut enemy = Enemy::new_with_terrain(spawn_pos.x, spawn_pos.z, *enemy_type, terrain);
                 enemy.pos.y = spawn_pos.y;
                 
                 // Assign a patrol route

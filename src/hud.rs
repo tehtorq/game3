@@ -2,6 +2,7 @@ use glam::Vec3;
 use crate::renderer::Renderer;
 use crate::player::Player;
 use crate::game::Game;
+use crate::terrain_instanced::InstancedTerrain;
 
 pub struct HUD {
     minimap_size: f32,
@@ -24,7 +25,7 @@ impl HUD {
         self.minimap_range = (self.minimap_range * 1.33).min(50000.0); // Allow zooming out to see entire map
     }
     
-    pub fn draw(&self, renderer: &mut Renderer, game: &Game, screen_width: f32, screen_height: f32) {
+    pub fn draw(&self, renderer: &mut Renderer, game: &Game, screen_width: f32, screen_height: f32, terrain: Option<&InstancedTerrain>) {
         let player = &game.player;
         // Speed indicator (bottom left)
         let speed = player.get_speed();
@@ -33,7 +34,7 @@ impl HUD {
         
         // Altitude indicators (bottom left, below speed)
         let altitude = player.get_altitude();
-        let terrain_height = player.get_height_above_terrain();
+        let terrain_height = player.get_height_above_terrain(terrain);
         
         let alt_text = format!("ALT: {:.0}", altitude);
         let terrain_text = format!("AGL: {:.0}", terrain_height); // Above Ground Level

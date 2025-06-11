@@ -5,7 +5,7 @@
 /// View distance in chunks. Each chunk is 160x160 units.
 /// This determines how far the player can see terrain.
 /// Total chunks rendered = (VIEW_DISTANCE * 2 + 1)^2
-pub const VIEW_DISTANCE: i32 = 100;
+pub const VIEW_DISTANCE: i32 = 50;
 
 /// Size of each terrain chunk in world units
 pub const CHUNK_SIZE: f32 = 160.0;

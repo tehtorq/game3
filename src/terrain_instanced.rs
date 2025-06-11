@@ -4,16 +4,24 @@ use crate::biome::{BiomeMap, Biome};
 use crate::constants::*;
 
 pub struct InstancedTerrain {
-    base_mesh_vertex_buffer: BufferId,
-    base_mesh_index_buffer: BufferId,
-    instance_buffer: BufferId,
+    vertex_buffer: BufferId,
+    index_buffer: BufferId,
     height_texture: TextureId,
     biome_texture: TextureId,
-    index_count: i32,
-    instance_count: i32,
+    vertex_count: i32,
     terrain_scale: f32,
     biome_map: BiomeMap,
     view_distance: i32,
+    chunk_data: Vec<ChunkData>,
+}
+
+struct ChunkData {
+    chunk_x: i32,
+    chunk_z: i32,
+    vertex_offset: u32,
+    vertex_count: u32,
+    index_offset: u32,
+    index_count: u32,
 }
 
 impl InstancedTerrain {
@@ -28,32 +36,24 @@ impl InstancedTerrain {
         biome_data: Vec<u8>,
         texture_size: u32
     ) -> Self {
-        // Create base mesh (single chunk template)
-        let (vertices, indices) = Self::create_base_mesh();
+        // Create biome map
+        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
+        let biome_map = BiomeMap::new(terrain_scale, 0);
         
-        let base_mesh_vertex_buffer = ctx.new_buffer(
+        // Generate all terrain vertices with pre-calculated heights
+        let (vertices, indices, chunk_data) = Self::create_all_terrain_vertices(view_distance, &biome_map);
+        
+        let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&vertices)
         );
         
-        let base_mesh_index_buffer = ctx.new_buffer(
+        let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&indices)
         );
-        
-        // Create instance data (chunk positions)
-        let instance_data = Self::create_instance_data(view_distance);
-        let instance_count = instance_data.len() as i32 / 2;
-        
-        let instance_buffer = ctx.new_buffer(
-            BufferType::VertexBuffer,
-            BufferUsage::Stream,
-            BufferSource::slice(&instance_data)
-        );
-        
-        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
         
         // Create textures from cached data
         let height_texture = ctx.new_texture(
@@ -62,8 +62,8 @@ impl InstancedTerrain {
             TextureParams {
                 format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Clamp,
-                min_filter: FilterMode::Linear,
-                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Nearest,
+                mag_filter: FilterMode::Nearest,
                 mipmap_filter: MipmapFilterMode::None,
                 width: texture_size,
                 height: texture_size,
@@ -90,25 +90,23 @@ impl InstancedTerrain {
             }
         );
         
-        // Create a dummy biome map (not needed when loading from cache)
-        let biome_map = BiomeMap::new(terrain_scale, 0);
-        
         println!("Loaded terrain from cache");
-        println!("  Instances: {}", instance_count);
+        println!("  Total vertices: {}", vertices.len());
+        println!("  Total indices: {}", indices.len());
+        println!("  Chunks: {}", chunk_data.len());
         println!("  Terrain scale: {}", terrain_scale);
         println!("  Texture size: {}x{}", texture_size, texture_size);
         
         Self {
-            base_mesh_vertex_buffer,
-            base_mesh_index_buffer,
-            instance_buffer,
+            vertex_buffer,
+            index_buffer,
             height_texture,
             biome_texture,
-            index_count: indices.len() as i32,
-            instance_count,
+            vertex_count: vertices.len() as i32,
             terrain_scale,
             biome_map,
             view_distance,
+            chunk_data,
         }
     }
     
@@ -120,36 +118,26 @@ impl InstancedTerrain {
     ) -> Self {
         use crate::terrain_cache::TerrainCache;
         
-        // Create base mesh (single chunk template)
-        let (vertices, indices) = Self::create_base_mesh();
+        // Create biome map
+        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
+        let biome_map = BiomeMap::new(terrain_scale, seed);
         
-        let base_mesh_vertex_buffer = ctx.new_buffer(
+        // Generate all terrain vertices with pre-calculated heights
+        let (vertices, indices, chunk_data) = Self::create_all_terrain_vertices(view_distance, &biome_map);
+        
+        let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&vertices)
         );
         
-        let base_mesh_index_buffer = ctx.new_buffer(
+        let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&indices)
         );
         
-        // Create instance data (chunk positions)
-        let instance_data = Self::create_instance_data(view_distance);
-        let instance_count = instance_data.len() as i32 / 2;
-        
-        let instance_buffer = ctx.new_buffer(
-            BufferType::VertexBuffer,
-            BufferUsage::Stream,
-            BufferSource::slice(&instance_data)
-        );
-        
-        // Create biome map
-        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
-        let biome_map = BiomeMap::new(terrain_scale, seed);
-        
-        // Create height and biome textures
+        // Create height and biome textures (still needed for CPU-side queries and biome colors)
         let texture_size = TERRAIN_TEXTURE_SIZE;
         let (height_texture, biome_texture, height_data, biome_data) = Self::create_terrain_textures(ctx, texture_size, terrain_scale, &biome_map);
         
@@ -161,78 +149,66 @@ impl InstancedTerrain {
         }
         
         println!("Created instanced terrain:");
-        println!("  Base mesh: {} vertices, {} indices", vertices.len(), indices.len());
-        println!("  Instances: {}", instance_count);
+        println!("  Total vertices: {}", vertices.len());
+        println!("  Total indices: {}", indices.len());
+        println!("  Chunks: {}", chunk_data.len());
         println!("  Terrain scale: {}", terrain_scale);
         println!("  Texture size: {}x{}", texture_size, texture_size);
-        println!("  Biome regions created");
         
         Self {
-            base_mesh_vertex_buffer,
-            base_mesh_index_buffer,
-            instance_buffer,
+            vertex_buffer,
+            index_buffer,
             height_texture,
             biome_texture,
-            index_count: indices.len() as i32,
-            instance_count,
+            vertex_count: vertices.len() as i32,
             terrain_scale,
             biome_map,
             view_distance,
+            chunk_data,
         }
     }
     
     pub fn new_with_seed(ctx: &mut dyn RenderingBackend, view_distance: i32, seed: u32) -> Self {
-        // Create base mesh (single chunk template)
-        let (vertices, indices) = Self::create_base_mesh();
+        // Create biome map
+        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
+        let biome_map = BiomeMap::new(terrain_scale, seed);
         
-        let base_mesh_vertex_buffer = ctx.new_buffer(
+        // Generate all terrain vertices with pre-calculated heights
+        let (vertices, indices, chunk_data) = Self::create_all_terrain_vertices(view_distance, &biome_map);
+        
+        let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&vertices)
         );
         
-        let base_mesh_index_buffer = ctx.new_buffer(
+        let index_buffer = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&indices)
         );
         
-        // Create instance data (chunk positions)
-        let instance_data = Self::create_instance_data(view_distance);
-        let instance_count = instance_data.len() as i32 / 2; // 2 floats per instance
-        
-        let instance_buffer = ctx.new_buffer(
-            BufferType::VertexBuffer,
-            BufferUsage::Stream,
-            BufferSource::slice(&instance_data)
-        );
-        
-        // Create biome map
-        let terrain_scale = (view_distance as f32 * 2.0 + 1.0) * CHUNK_SIZE;
-        let biome_map = BiomeMap::new(terrain_scale, seed);
-        
-        // Create height and biome textures
+        // Create height and biome textures (still needed for CPU-side queries and biome colors)
         let texture_size = TERRAIN_TEXTURE_SIZE;
-        let (height_texture, biome_texture, height_data, biome_data) = Self::create_terrain_textures(ctx, texture_size, terrain_scale, &biome_map);
+        let (height_texture, biome_texture, _height_data, _biome_data) = Self::create_terrain_textures(ctx, texture_size, terrain_scale, &biome_map);
         
         println!("Created instanced terrain:");
-        println!("  Base mesh: {} vertices, {} indices", vertices.len(), indices.len());
-        println!("  Instances: {}", instance_count);
+        println!("  Total vertices: {}", vertices.len());
+        println!("  Total indices: {}", indices.len());
+        println!("  Chunks: {}", chunk_data.len());
         println!("  Terrain scale: {}", terrain_scale);
         println!("  Texture size: {}x{}", texture_size, texture_size);
-        println!("  Biome regions created");
         
         Self {
-            base_mesh_vertex_buffer,
-            base_mesh_index_buffer,
-            instance_buffer,
+            vertex_buffer,
+            index_buffer,
             height_texture,
             biome_texture,
-            index_count: indices.len() as i32,
-            instance_count,
+            vertex_count: vertices.len() as i32,
             terrain_scale,
             biome_map,
             view_distance,
+            chunk_data,
         }
     }
     
@@ -305,6 +281,135 @@ impl InstancedTerrain {
         }
         
         println!("Total instances: {}", count);
+        instance_data
+    }
+    
+    fn create_all_terrain_vertices(view_distance: i32, biome_map: &BiomeMap) -> (Vec<Vertex>, Vec<u32>, Vec<ChunkData>) {
+        let mut all_vertices = Vec::new();
+        let mut all_indices = Vec::new();
+        let mut chunk_data = Vec::new();
+        
+        let chunk_size = CHUNK_SIZE;
+        let grid_size = CHUNK_GRID_SIZE;
+        let cell_size = chunk_size / grid_size as f32;
+        let half_size = chunk_size / 2.0;
+        
+        for chunk_x in -view_distance..=view_distance {
+            for chunk_z in -view_distance..=view_distance {
+                let chunk_world_x = chunk_x as f32 * chunk_size;
+                let chunk_world_z = chunk_z as f32 * chunk_size;
+                
+                let vertex_offset = all_vertices.len() as u32;
+                let index_offset = all_indices.len() as u32;
+                
+                // Generate vertices for this chunk with actual heights
+                for i in 0..grid_size {
+                    for j in 0..grid_size {
+                        let base_vertex_idx = all_vertices.len() as u32;
+                        
+                        // Calculate positions for this cell
+                        let x0 = chunk_world_x - half_size + (i as f32) * cell_size;
+                        let x1 = chunk_world_x - half_size + ((i + 1) as f32) * cell_size;
+                        let z0 = chunk_world_z - half_size + (j as f32) * cell_size;
+                        let z1 = chunk_world_z - half_size + ((j + 1) as f32) * cell_size;
+                        
+                        // Get actual heights for each corner
+                        let h00 = Self::get_height_for_vertex(x0, z0, biome_map);
+                        let h10 = Self::get_height_for_vertex(x1, z0, biome_map);
+                        let h01 = Self::get_height_for_vertex(x0, z1, biome_map);
+                        let h11 = Self::get_height_for_vertex(x1, z1, biome_map);
+                        
+                        // First triangle
+                        all_vertices.push(Vertex::with_barycentric(x0, h00, z0, 1.0, 0.0, 0.0));
+                        all_vertices.push(Vertex::with_barycentric(x1, h10, z0, 0.0, 1.0, 0.0));
+                        all_vertices.push(Vertex::with_barycentric(x0, h01, z1, 0.0, 0.0, 1.0));
+                        
+                        all_indices.push(base_vertex_idx);
+                        all_indices.push(base_vertex_idx + 1);
+                        all_indices.push(base_vertex_idx + 2);
+                        
+                        // Second triangle
+                        all_vertices.push(Vertex::with_barycentric(x1, h10, z0, 1.0, 0.0, 0.0));
+                        all_vertices.push(Vertex::with_barycentric(x1, h11, z1, 0.0, 1.0, 0.0));
+                        all_vertices.push(Vertex::with_barycentric(x0, h01, z1, 0.0, 0.0, 1.0));
+                        
+                        all_indices.push(base_vertex_idx + 3);
+                        all_indices.push(base_vertex_idx + 4);
+                        all_indices.push(base_vertex_idx + 5);
+                    }
+                }
+                
+                let vertex_count = all_vertices.len() as u32 - vertex_offset;
+                let index_count = all_indices.len() as u32 - index_offset;
+                
+                chunk_data.push(ChunkData {
+                    chunk_x,
+                    chunk_z,
+                    vertex_offset,
+                    vertex_count,
+                    index_offset,
+                    index_count,
+                });
+            }
+        }
+        
+        println!("Generated terrain: {} vertices, {} indices, {} chunks", 
+                 all_vertices.len(), all_indices.len(), chunk_data.len());
+        
+        (all_vertices, all_indices, chunk_data)
+    }
+    
+    fn get_height_for_vertex(x: f32, z: f32, biome_map: &BiomeMap) -> f32 {
+        let biome_weights = biome_map.get_biome_weights(x, z);
+        Self::height_at_with_biomes(x, z, &biome_weights)
+    }
+    
+    fn create_instance_data_with_heights(view_distance: i32, terrain_scale: f32, biome_map: &BiomeMap) -> Vec<f32> {
+        let mut instance_data = Vec::new();
+        let chunk_size = CHUNK_SIZE;
+        let grid_size = CHUNK_GRID_SIZE;
+        let vertices_per_chunk = (grid_size + 1) * (grid_size + 1); // 9x9 = 81 vertices
+        
+        let mut count = 0;
+        for chunk_x in -view_distance..=view_distance {
+            for chunk_z in -view_distance..=view_distance {
+                let chunk_world_x = chunk_x as f32 * chunk_size;
+                let chunk_world_z = chunk_z as f32 * chunk_size;
+                
+                // Add chunk offset
+                instance_data.push(chunk_world_x);
+                instance_data.push(chunk_world_z);
+                
+                // Calculate and add heights for all vertices in this chunk
+                let cell_size = chunk_size / grid_size as f32;
+                let half_size = chunk_size / 2.0;
+                
+                for i in 0..=grid_size {
+                    for j in 0..=grid_size {
+                        // Calculate world position of this vertex
+                        let local_x = -half_size + (i as f32) * cell_size;
+                        let local_z = -half_size + (j as f32) * cell_size;
+                        let world_x = chunk_world_x + local_x;
+                        let world_z = chunk_world_z + local_z;
+                        
+                        // Get height at this position
+                        let biome_weights = biome_map.get_biome_weights(world_x, world_z);
+                        let height = Self::height_at_with_biomes(world_x, world_z, &biome_weights);
+                        
+                        instance_data.push(height);
+                    }
+                }
+                
+                count += 1;
+                
+                // Debug first few instances
+                if count <= 2 {
+                    println!("Instance {}: offset ({}, {}), {} heights", count - 1, chunk_world_x, chunk_world_z, vertices_per_chunk);
+                }
+            }
+        }
+        
+        println!("Total instances: {}, floats per instance: {}", count, 2 + vertices_per_chunk);
         instance_data
     }
     
@@ -401,8 +506,8 @@ impl InstancedTerrain {
             TextureParams {
                 format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Clamp,
-                min_filter: FilterMode::Linear,
-                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Nearest,
+                mag_filter: FilterMode::Nearest,
                 mipmap_filter: MipmapFilterMode::None,
                 width: size,
                 height: size,
@@ -762,16 +867,12 @@ impl InstancedTerrain {
         }
     }
     
-    pub fn base_vertex_buffer(&self) -> BufferId {
-        self.base_mesh_vertex_buffer
-    }
-    
-    pub fn instance_buffer(&self) -> BufferId {
-        self.instance_buffer
+    pub fn vertex_buffer(&self) -> BufferId {
+        self.vertex_buffer
     }
     
     pub fn index_buffer(&self) -> BufferId {
-        self.base_mesh_index_buffer
+        self.index_buffer
     }
     
     pub fn height_texture(&self) -> TextureId {
@@ -782,12 +883,13 @@ impl InstancedTerrain {
         self.biome_texture
     }
     
-    pub fn index_count(&self) -> i32 {
-        self.index_count
+    pub fn vertex_count(&self) -> i32 {
+        self.vertex_count
     }
     
-    pub fn instance_count(&self) -> i32 {
-        self.instance_count
+    pub fn index_count(&self) -> i32 {
+        // Calculate total indices from chunk data
+        self.chunk_data.iter().map(|chunk| chunk.index_count as i32).sum()
     }
     
     pub fn terrain_scale(&self) -> f32 {
@@ -803,50 +905,10 @@ impl InstancedTerrain {
         self.biome_map.get_biome_at(x, z)
     }
     
-    /// Update instance positions to be centered around the player
-    /// Returns the number of visible chunks
-    pub fn update_for_player_position(&mut self, ctx: &mut dyn RenderingBackend, player_x: f32, player_z: f32, player_rotation: f32) -> i32 {
-        // Calculate which chunk the player is in
-        let player_chunk_x = (player_x / CHUNK_SIZE).floor() as i32;
-        let player_chunk_z = (player_z / CHUNK_SIZE).floor() as i32;
-        
-        // Generate new instance data centered on player's chunk
-        let mut instance_data = Vec::new();
-        
-        // Calculate view direction
-        let view_dir_x = -player_rotation.sin();
-        let view_dir_z = -player_rotation.cos();
-        
-        let mut visible_chunks = 0;
-        
-        for x in -self.view_distance..=self.view_distance {
-            for z in -self.view_distance..=self.view_distance {
-                let chunk_x = player_chunk_x + x;
-                let chunk_z = player_chunk_z + z;
-                
-                // Calculate chunk center position relative to player
-                let chunk_center_x = chunk_x as f32 * CHUNK_SIZE - player_x;
-                let chunk_center_z = chunk_z as f32 * CHUNK_SIZE - player_z;
-                
-                // Simple frustum culling: check if chunk is in front of player
-                // Dot product with view direction
-                let dot = chunk_center_x * view_dir_x + chunk_center_z * view_dir_z;
-                
-                // Only include chunks that are in front or to the sides (dot > -CHUNK_SIZE)
-                if dot > -CHUNK_SIZE * 2.0 {
-                    instance_data.push(chunk_x as f32 * CHUNK_SIZE);
-                    instance_data.push(chunk_z as f32 * CHUNK_SIZE);
-                    visible_chunks += 1;
-                }
-            }
-        }
-        
-        // Update the instance buffer
-        ctx.buffer_update(self.instance_buffer, BufferSource::slice(&instance_data));
-        
-        // Update instance count
-        self.instance_count = visible_chunks;
-        
-        visible_chunks
+    /// Since we're no longer using instancing, this just returns the total chunk count
+    pub fn update_for_player_position(&mut self, _ctx: &mut dyn RenderingBackend, _player_x: f32, _player_z: f32, _player_rotation: f32) -> i32 {
+        // No longer need to update instance data since we're not using instancing
+        // All terrain vertices are pre-generated with their heights
+        self.chunk_data.len() as i32
     }
 }
