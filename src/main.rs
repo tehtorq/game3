@@ -7,7 +7,6 @@ mod math;
 mod vertex;
 mod renderer;
 mod terrain;
-mod terrain_instanced;
 mod terrain_cache;
 mod biome;
 mod player;
@@ -30,7 +29,7 @@ use enemy::{EnemyType, AlertState};
 use hud::HUD;
 use camera::Camera;
 use game::Game;
-use terrain_instanced::InstancedTerrain;
+use terrain::Terrain;
 use terrain_cache::TerrainCache;
 use constants::*;
 
@@ -76,7 +75,7 @@ struct Stage {
     camera: Camera,
     input: InputState,
     paused: bool,
-    instanced_terrain: Option<InstancedTerrain>,
+    instanced_terrain: Option<Terrain>,
     terrain_config: TerrainConfig,
     hud: HUD,
     // FPS tracking fields
@@ -310,22 +309,22 @@ impl EventHandler for Stage {
                         if let Some(ref name) = self.terrain_config.name {
                             match TerrainCache::load_terrain_textures(name) {
                                 Ok((height_data, biome_data, size)) => {
-                                    InstancedTerrain::new_from_cache(&mut *ctx_ptr, VIEW_DISTANCE, height_data, biome_data, size)
+                                    Terrain::new_from_cache(&mut *ctx_ptr, VIEW_DISTANCE, height_data, biome_data, size)
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to load terrain '{}': {}", name, e);
                                     eprintln!("Falling back to default terrain");
-                                    InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
+                                    Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                                 }
                             }
                         } else {
-                            InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
+                            Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                         }
                     }
                     TerrainMode::Create => {
                         let seed = self.terrain_config.seed.unwrap_or(rand::random());
                         println!("Creating terrain with seed: {}", seed);
-                        InstancedTerrain::new_with_seed_and_save(
+                        Terrain::new_with_seed_and_save(
                             &mut *ctx_ptr, 
                             VIEW_DISTANCE, 
                             seed,
@@ -333,7 +332,7 @@ impl EventHandler for Stage {
                         )
                     }
                     TerrainMode::Default => {
-                        InstancedTerrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
+                        Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
                     }
                 };
                 

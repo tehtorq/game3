@@ -1,7 +1,7 @@
 use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
-use crate::terrain_instanced::InstancedTerrain;
+use crate::terrain::Terrain;
 
 #[derive(Clone)]
 pub struct Player {
@@ -125,7 +125,7 @@ impl Player {
         self.pos += self.vel * dt;
         
         // Constrain player height based on terrain below
-        let terrain_below = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+        let terrain_below = Terrain::height_at(self.pos.x, self.pos.z);
         let min_height = terrain_below + 10.0;
         
         if self.pos.y < min_height {
@@ -171,7 +171,7 @@ impl Player {
     }
     
     pub fn get_terrain_height(&self) -> f32 {
-        InstancedTerrain::height_at(self.pos.x, self.pos.z)
+        Terrain::height_at(self.pos.x, self.pos.z)
     }
     
     pub fn get_height_above_terrain(&self) -> f32 {

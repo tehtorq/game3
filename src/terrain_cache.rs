@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use image::{ImageBuffer, Rgba, RgbaImage};
+use image::{ImageBuffer, RgbaImage};
 
 pub struct TerrainCache;
 

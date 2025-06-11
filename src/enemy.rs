@@ -2,7 +2,7 @@ use glam::Vec3;
 use rand::prelude::*;
 use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
-use crate::terrain_instanced::InstancedTerrain;
+use crate::terrain::Terrain;
 use std::f32::consts::PI;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -96,7 +96,7 @@ impl Enemy {
         let mut rng = thread_rng();
         
         // Calculate spawn height based on terrain
-        let terrain_height = InstancedTerrain::height_at(x, z);
+        let terrain_height = Terrain::height_at(x, z);
         let spawn_height = terrain_height + rng.gen_range(30.0..100.0);
         
         // Assign movement pattern based on enemy type
@@ -177,7 +177,7 @@ impl Enemy {
                 let radius_variation = patrol_radius * rng.gen_range(0.7..1.3);
                 let wx = x + angle.cos() * radius_variation;
                 let wz = z + angle.sin() * radius_variation;
-                let wy = InstancedTerrain::height_at(wx, wz) + rng.gen_range(50.0..200.0);
+                let wy = Terrain::height_at(wx, wz) + rng.gen_range(50.0..200.0);
                 waypoints.push(Vec3::new(wx, wy, wz));
             }
             waypoints
@@ -306,7 +306,7 @@ impl Enemy {
         match effective_pattern {
             MovementPattern::Hover => {
                 // Maintain altitude above terrain
-                let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                 let hover_height = terrain_height + 50.0 + (self.phase * 0.5).sin() * 15.0;
                 
                 // Smooth altitude adjustment
@@ -362,7 +362,7 @@ impl Enemy {
                 let angle = self.phase * orbit_speed;
                 let target_x = self.spawn_point.x + angle.cos() * orbit_radius;
                 let target_z = self.spawn_point.z + angle.sin() * orbit_radius;
-                let target_y = InstancedTerrain::height_at(target_x, target_z) + 60.0 + (self.phase * 2.0).sin() * 20.0;
+                let target_y = Terrain::height_at(target_x, target_z) + 60.0 + (self.phase * 2.0).sin() * 20.0;
                 
                 let target = Vec3::new(target_x, target_y, target_z);
                 let to_target = target - self.pos;
@@ -375,7 +375,7 @@ impl Enemy {
                 
                 if dive_cycle < 2.0 {
                     // Climbing phase
-                    let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                    let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                     let climb_target = terrain_height + 150.0;
                     self.vel.y = (climb_target - self.pos.y).clamp(-self.speed, self.speed);
                     
@@ -426,7 +426,7 @@ impl Enemy {
                     self.vel = to_pred_target.normalize_or_zero() * self.speed * self.aggression * speed_mult;
                     
                     // Maintain some altitude
-                    let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                    let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                     if self.pos.y < terrain_height + 30.0 {
                         self.vel.y = (self.vel.y + 50.0).max(0.0);
                     }
@@ -452,7 +452,7 @@ impl Enemy {
                 self.vel = (to_player_norm * self.speed + swarm_offset) * self.aggression;
                 
                 // Maintain low altitude for swarming
-                let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                 let swarm_height = terrain_height + 30.0 + (self.phase * 3.0).sin() * 10.0;
                 self.vel.y = (swarm_height - self.pos.y) * 3.0;
             },
@@ -470,7 +470,7 @@ impl Enemy {
                     self.pos.z = player_pos.z + angle.sin() * distance;
                     
                     // Set altitude
-                    let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                    let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                     self.pos.y = terrain_height + 100.0;
                     
                     self.teleport_charge = 0.0;
@@ -486,7 +486,7 @@ impl Enemy {
                 self.vel = Vec3::ZERO;
                 
                 // Maintain altitude
-                let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                 let hover_height = terrain_height + 60.0;
                 self.pos.y = self.pos.y * 0.9 + hover_height * 0.1;
             },
@@ -498,7 +498,7 @@ impl Enemy {
                 self.vel.z = drift_angle.sin() * self.speed;
                 
                 // Maintain high altitude
-                let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+                let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
                 let cruise_height = terrain_height + 150.0;
                 self.vel.y = (cruise_height - self.pos.y).clamp(-20.0, 20.0);
             },
@@ -554,7 +554,7 @@ impl Enemy {
         }
         
         // Ensure enemies don't go below terrain
-        let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+        let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
         if self.pos.y < terrain_height + 10.0 {
             self.pos.y = terrain_height + 10.0;
             self.vel.y = self.vel.y.max(0.0);
@@ -702,7 +702,7 @@ impl Enemy {
         let distance_to_player = to_player.length();
         
         // Hover movement pattern with slow approach
-        let terrain_height = InstancedTerrain::height_at(self.pos.x, self.pos.z);
+        let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
         let hover_height = terrain_height + 80.0 + (self.phase * 0.3).sin() * 20.0;
         
         // Smooth altitude adjustment
