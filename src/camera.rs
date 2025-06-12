@@ -5,6 +5,10 @@ use crate::constants::*;
 pub struct Camera {
     pub distance: f32,
     pub height: f32,
+    // Smooth camera following
+    pub smooth_pos: Vec3,
+    pub smooth_rotation: f32,
+    pub initialized: bool,
 }
 
 impl Camera {
@@ -12,19 +16,58 @@ impl Camera {
         Self {
             distance: CAMERA_DISTANCE,
             height: CAMERA_HEIGHT,
+            smooth_pos: Vec3::ZERO,
+            smooth_rotation: 0.0,
+            initialized: false,
         }
     }
 
+    pub fn update(&mut self, player: &Player, dt: f32) {
+        // Initialize on first frame
+        if !self.initialized {
+            self.smooth_pos = player.pos;
+            self.smooth_rotation = player.rotation;
+            self.initialized = true;
+        }
+        
+        // Smooth position following
+        const POSITION_SMOOTHING: f32 = 8.0; // Lower = more lag
+        self.smooth_pos = self.smooth_pos.lerp(player.pos, 1.0 - (-POSITION_SMOOTHING * dt).exp());
+        
+        // Smooth rotation following with angle wrapping
+        const ROTATION_SMOOTHING: f32 = 6.0; // Lower = more lag
+        let mut angle_diff = player.rotation - self.smooth_rotation;
+        
+        // Wrap angle difference to [-PI, PI]
+        use std::f32::consts::PI;
+        while angle_diff > PI {
+            angle_diff -= 2.0 * PI;
+        }
+        while angle_diff < -PI {
+            angle_diff += 2.0 * PI;
+        }
+        
+        self.smooth_rotation += angle_diff * (1.0 - (-ROTATION_SMOOTHING * dt).exp());
+    }
+    
     pub fn get_view_matrix(&self, player: &Player) -> Mat4 {
-        // Position camera behind and above the player
+        // Position camera behind and above the player using smoothed values
         let camera_offset = Vec3::new(
-            player.rotation.sin() * self.distance,
+            self.smooth_rotation.sin() * self.distance,
             self.height,
-            player.rotation.cos() * self.distance
+            self.smooth_rotation.cos() * self.distance
         );
         
-        let camera_pos = player.pos + camera_offset;
-        let look_target = player.pos; // Look directly at player
+        let camera_pos = self.smooth_pos + camera_offset;
+        
+        // Look slightly ahead of the player
+        let look_ahead = Vec3::new(
+            -self.smooth_rotation.sin() * 50.0,
+            0.0,
+            -self.smooth_rotation.cos() * 50.0
+        );
+        let look_target = self.smooth_pos + look_ahead;
+        
         let up = Vec3::new(0.0, 1.0, 0.0);
         
         // Use left-handed coordinate system (this worked)

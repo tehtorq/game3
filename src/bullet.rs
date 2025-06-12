@@ -19,17 +19,13 @@ pub struct Bullet {
 
 impl Bullet {
     pub fn new(player: &Player) -> Self {
-        // Fire bullet in the horizontal direction the player is facing
-        // Only use yaw rotation, ignore pitch and banking for bullets
-        let forward = Vec3::new(-player.rotation.sin(), 0.0, -player.rotation.cos());
+        // Fire bullet in the direction the player is facing, including pitch
+        let forward = player.v_forward();
         
-        // Spawn bullet at player height, in front
+        // Spawn bullet slightly in front of the player
         let spawn_offset = forward * 30.0;
-        let spawn_pos = Vec3::new(
-            player.pos.x + spawn_offset.x,
-            player.pos.y,  // Same height as player
-            player.pos.z + spawn_offset.z
-        );
+        let spawn_pos = player.pos + spawn_offset;
+        
         
         Self {
             pos: spawn_pos,
@@ -56,6 +52,12 @@ impl Bullet {
 
     pub fn update(&mut self, dt: f32) {
         self.pos += self.vel * dt;
+    }
+    
+    pub fn get_debug_info(&self) -> String {
+        format!("pos: ({:.1}, {:.1}, {:.1}), vel: ({:.1}, {:.1}, {:.1})", 
+                self.pos.x, self.pos.y, self.pos.z,
+                self.vel.x, self.vel.y, self.vel.z)
     }
 }
 

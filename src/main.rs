@@ -84,6 +84,8 @@ struct Stage {
     last_frame_time: f64,
     // Fullscreen state
     fullscreen: bool,
+    // Mouse capture state
+    mouse_captured: bool,
 }
 
 #[derive(Clone)]
@@ -104,10 +106,13 @@ enum TerrainMode {
 struct InputState {
     left: bool,
     right: bool,
-    up: bool,
-    down: bool,
+    forward: bool,
+    backward: bool,
     shoot: bool,
     boost: bool,
+    up: bool,
+    mouse_target_x: f32,  // Mouse position relative to center (-1 to 1)
+    mouse_target_y: f32,  // Mouse position relative to center (-1 to 1)
 }
 
 impl Stage {
@@ -255,12 +260,14 @@ impl Stage {
             fps_timer: 0.0,
             last_frame_time: miniquad::date::now(),
             fullscreen: true,
+            mouse_captured: true,
         };
         
-        // Start in fullscreen
+        // Start in fullscreen with mouse captured
         let (screen_width, screen_height) = window::screen_size();
         window::set_window_size(screen_width as u32, screen_height as u32);
         window::set_fullscreen(true);
+        window::show_mouse(false);
         
         stage
     }
@@ -270,15 +277,21 @@ impl EventHandler for Stage {
     fn update(&mut self) {
         if !self.paused {
             let dt = 1.0 / 60.0;
+            // Apply mouse aim to player
+            self.game.player.apply_mouse_aim(self.input.mouse_target_x, self.input.mouse_target_y, dt);
+            
             self.game.update(
                 self.input.left,
                 self.input.right,
-                self.input.up,
-                self.input.down,
+                self.input.forward,
+                self.input.backward,
                 self.input.shoot,
                 self.input.boost,
+                self.input.up,
                 dt
             );
+            // Update camera with smoothing
+            self.camera.update(&self.game.player, dt);
         }
     }
 
@@ -295,6 +308,7 @@ impl EventHandler for Stage {
         if self.fps_timer >= 1.0 && SHOW_FPS {
             let fps = self.frame_count as f64 / self.fps_timer;
             println!("FPS: {:.1}", fps);
+            println!("Enemies: {}", self.game.enemies.len());
             self.frame_count = 0;
             self.fps_timer = 0.0;
         }
@@ -937,6 +951,60 @@ impl EventHandler for Stage {
             
             let (width, height) = window::screen_size();
             self.hud.draw(&mut renderer, &self.game, width, height);
+            
+            // Project crosshair into 3D space in front of ship, then back to screen
+            // This makes the crosshair feel like it's attached to a point in space
+            let aim_distance = 200.0; // Distance in front of ship
+            
+            // Get ship's forward direction with mouse influence
+            let mouse_yaw_offset = self.input.mouse_target_x * 0.5; // How much mouse affects aim
+            let mouse_pitch_offset = -self.input.mouse_target_y * 0.3; // Less vertical influence
+            
+            let aim_yaw = self.game.player.rotation + mouse_yaw_offset;
+            let aim_pitch = self.game.player.pitch + mouse_pitch_offset;
+            
+            // Calculate 3D position of aim point
+            let aim_forward = Vec3::new(
+                -aim_yaw.sin() * aim_pitch.cos(),
+                aim_pitch.sin(),
+                -aim_yaw.cos() * aim_pitch.cos()
+            );
+            let aim_point_3d = self.game.player.pos + aim_forward * aim_distance;
+            
+            // Project this 3D point back to screen space
+            let view_proj = proj * view;
+            let aim_point_clip = view_proj * aim_point_3d.extend(1.0);
+            
+            // Convert to screen coordinates
+            let crosshair_x = if aim_point_clip.w != 0.0 {
+                (aim_point_clip.x / aim_point_clip.w) * aspect * 40.0
+            } else {
+                self.input.mouse_target_x * 30.0
+            };
+            
+            let crosshair_y = if aim_point_clip.w != 0.0 {
+                (aim_point_clip.y / aim_point_clip.w) * 40.0
+            } else {
+                -self.input.mouse_target_y * 30.0
+            };
+            
+            let crosshair_size = 1.0;
+            
+            // Horizontal line
+            renderer.draw_line(
+                Vec3::new(crosshair_x - crosshair_size, crosshair_y, -1.0),
+                Vec3::new(crosshair_x + crosshair_size, crosshair_y, -1.0)
+            );
+            // Vertical line
+            renderer.draw_line(
+                Vec3::new(crosshair_x, crosshair_y - crosshair_size, -1.0),
+                Vec3::new(crosshair_x, crosshair_y + crosshair_size, -1.0)
+            );
+            // Center dot
+            renderer.draw_line(
+                Vec3::new(crosshair_x - 0.2, crosshair_y, -1.0),
+                Vec3::new(crosshair_x + 0.2, crosshair_y, -1.0)
+            );
         }
         
         if !vertices.is_empty() {
@@ -961,12 +1029,16 @@ impl EventHandler for Stage {
         match keycode {
             KeyCode::Left | KeyCode::A => self.input.left = true,
             KeyCode::Right | KeyCode::D => self.input.right = true,
-            KeyCode::Up | KeyCode::W => self.input.up = true,
-            KeyCode::Down | KeyCode::S => self.input.down = true,
-            KeyCode::Space => self.input.shoot = true,
+            KeyCode::Up | KeyCode::W => self.input.forward = true,
+            KeyCode::Down | KeyCode::S => self.input.backward = true,
+            KeyCode::Space => self.input.up = true,
             KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = true,
             KeyCode::Escape => window::request_quit(),
             KeyCode::P => self.paused = !self.paused,
+            KeyCode::M => {
+                self.mouse_captured = !self.mouse_captured;
+                window::show_mouse(!self.mouse_captured);
+            }
             KeyCode::F => {
                 self.fullscreen = !self.fullscreen;
                 if self.fullscreen {
@@ -990,10 +1062,37 @@ impl EventHandler for Stage {
         match keycode {
             KeyCode::Left | KeyCode::A => self.input.left = false,
             KeyCode::Right | KeyCode::D => self.input.right = false,
-            KeyCode::Up | KeyCode::W => self.input.up = false,
-            KeyCode::Down | KeyCode::S => self.input.down = false,
-            KeyCode::Space => self.input.shoot = false,
+            KeyCode::Up | KeyCode::W => self.input.forward = false,
+            KeyCode::Down | KeyCode::S => self.input.backward = false,
+            KeyCode::Space => self.input.up = false,
             KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = false,
+            _ => {}
+        }
+    }
+    
+    fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        // Calculate mouse position relative to screen center
+        let (width, height) = window::screen_size();
+        
+        // Convert to -1 to 1 range where center is 0
+        self.input.mouse_target_x = (x - width / 2.0) / (width / 2.0);
+        self.input.mouse_target_y = (y - height / 2.0) / (height / 2.0);
+        
+        // Clamp to reasonable range
+        self.input.mouse_target_x = self.input.mouse_target_x.clamp(-1.0, 1.0);
+        self.input.mouse_target_y = self.input.mouse_target_y.clamp(-1.0, 1.0);
+    }
+    
+    fn mouse_button_down_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
+        match button {
+            MouseButton::Left => self.input.shoot = true,
+            _ => {}
+        }
+    }
+    
+    fn mouse_button_up_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
+        match button {
+            MouseButton::Left => self.input.shoot = false,
             _ => {}
         }
     }

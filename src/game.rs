@@ -79,9 +79,9 @@ impl Game {
         game
     }
 
-    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, shoot: bool, boost: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, dt: f32) {
         // Update player (slow effect would need to be implemented in player.rs)
-        self.player.update(left, right, up, down, boost, dt);
+        self.player.update(left, right, forward, backward, boost, up, dt);
         
         // Update timers
         if self.player_invulnerable_timer > 0.0 {

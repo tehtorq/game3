@@ -45,72 +45,168 @@ impl Player {
         }
     }
 
-    pub fn update(&mut self, left: bool, right: bool, up: bool, down: bool, boost: bool, dt: f32) {
+    // Get normalized forward vector (pointing in the direction the ship is facing)
+    pub fn v_forward(&self) -> Vec3 {
+        let yaw_cos = self.rotation.cos();
+        let yaw_sin = self.rotation.sin();
+        let pitch_cos = self.pitch.cos();
+        let pitch_sin = self.pitch.sin();
+        
+        Vec3::new(
+            -yaw_sin * pitch_cos,
+            pitch_sin,  // Positive pitch should give positive Y (up)
+            -yaw_cos * pitch_cos
+        ).normalize()
+    }
+    
+    // Get normalized up vector (pointing up from the ship)
+    pub fn v_up(&self) -> Vec3 {
+        let rotation = rotation_matrix(self.rotation, self.pitch, self.banking);
+        rotation.transform_vector3(Vec3::new(0.0, 1.0, 0.0)).normalize()
+    }
+    
+    // Get normalized right vector (pointing to the right of the ship)
+    pub fn v_right(&self) -> Vec3 {
+        let rotation = rotation_matrix(self.rotation, self.pitch, self.banking);
+        rotation.transform_vector3(Vec3::new(1.0, 0.0, 0.0)).normalize()
+    }
+    
+    // Apply mouse aim - ship rotates to face mouse target
+    pub fn apply_mouse_aim(&mut self, mouse_target_x: f32, mouse_target_y: f32, dt: f32) {
+        const MAX_TURN_SPEED: f32 = 2.5; // Maximum rotation speed
+        const MAX_PITCH: f32 = 0.8; // Limit pitch to about 45 degrees
+        const YAW_SENSITIVITY: f32 = 1.5; // How much the mouse affects yaw
+        const PITCH_SENSITIVITY: f32 = 0.4; // Reduced pitch sensitivity
+        const DEADZONE: f32 = 0.05; // Small deadzone to prevent oscillation
+        const PITCH_DEADZONE: f32 = 0.15; // Larger deadzone for pitch
+        
+        // Calculate desired turn rate based on mouse offset from center
+        let yaw_error = mouse_target_x * YAW_SENSITIVITY;
+        
+        // Apply deadzone to prevent tiny oscillations
+        let yaw_rate = if yaw_error.abs() < DEADZONE {
+            0.0
+        } else {
+            // Use the error directly as turn rate (proportional control)
+            yaw_error * MAX_TURN_SPEED
+        };
+        
+        // Apply rotation
+        self.rotation += yaw_rate * dt;
+        
+        // Wrap rotation
+        use std::f32::consts::PI;
+        while self.rotation > PI {
+            self.rotation -= 2.0 * PI;
+        }
+        while self.rotation < -PI {
+            self.rotation += 2.0 * PI;
+        }
+        
+        // Calculate target pitch with deadzone
+        let pitch_input = if mouse_target_y.abs() < PITCH_DEADZONE {
+            0.0
+        } else {
+            -mouse_target_y * MAX_PITCH * PITCH_SENSITIVITY
+        };
+        
+        // Smoothly adjust pitch towards target
+        let target_pitch = pitch_input;
+        let pitch_diff = target_pitch - self.pitch;
+        let pitch_change = pitch_diff * 5.0 * dt; // Smooth pitch adjustment
+        self.pitch = (self.pitch + pitch_change).clamp(-MAX_PITCH, MAX_PITCH);
+    }
+
+    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, boost: bool, up: bool, dt: f32) {
         // Physics constants
-        const TURN_ACCELERATION: f32 = 8.0;  // Doubled for snappier turning
+        const TURN_ACCELERATION: f32 = 8.0;  // For mouse turning
         const TURN_DAMPING: f32 = 0.9;      // Less damping for more responsive controls
         const MAX_TURN_SPEED: f32 = 4.0;    // Slightly faster max turn rate
         
-        const THRUST_POWER: f32 = 1200.0;   // More than doubled for snappier acceleration
-        const VERTICAL_THRUST: f32 = 600.0;  // Doubled for better vertical control
-        const AFTERBURNER_MULTIPLIER: f32 = 3.0;  // Even more powerful to escape aggressive enemies
-        const AFTERBURNER_DRAIN: f32 = 0.33; // 3 seconds of fuel
-        const AFTERBURNER_REGEN: f32 = 0.15; // Faster regen (6.7 seconds to refill)
+        const THRUST_POWER: f32 = 800.0;    // Forward thrust power
+        const STRAFE_POWER: f32 = 600.0;    // Lateral thrust power
+        const BOOST_MULTIPLIER: f32 = 2.5;  // Speed boost when holding shift
         
-        const AIR_DRAG: f32 = 1.5;          // Much higher drag for tighter control
-        const BRAKE_DRAG: f32 = 4.0;        // Stronger brakes
+        const AIR_DRAG: f32 = 2.5;          // Higher drag for hover behavior
+        const HOVER_DRAG: f32 = 6.0;        // Extra drag when not thrusting
         const GRAVITY: f32 = 80.0;          // Slightly stronger gravity
         const MAX_SPEED: f32 = 800.0;       // Increased to outrun aggressive enemies
         const MAX_VERTICAL_SPEED: f32 = 300.0;  // Reduced to match
         
-        // Handle rotation with acceleration
-        let turn_input = (right as i32 - left as i32) as f32;
-        self.angular_vel += turn_input * TURN_ACCELERATION * dt;
-        self.angular_vel = self.angular_vel.clamp(-MAX_TURN_SPEED, MAX_TURN_SPEED);
-        self.angular_vel *= TURN_DAMPING; // Damping
-        self.rotation += self.angular_vel * dt;
+        // Angular velocity is no longer used (direct mouse control)
+        self.angular_vel = 0.0;
         
-        // Update banking based on angular velocity - more responsive
-        let target_banking = self.angular_vel / MAX_TURN_SPEED * 0.8;  // More pronounced banking
-        self.banking = self.banking * 0.7 + target_banking * 0.3;      // Faster response
-        
-        // Update pitch based on vertical input - more responsive
-        let target_pitch = (down as i32 - up as i32) as f32 * 0.4;    // More pronounced pitch
-        self.pitch = self.pitch * 0.8 + target_pitch * 0.2;           // Faster response
-        
-        // Calculate thrust based on inputs
-        let forward_dir = Vec3::new(-self.rotation.sin(), 0.0, -self.rotation.cos());
-        let mut thrust_magnitude = THRUST_POWER;
-        
-        // Afterburner system
-        if boost && self.afterburner_fuel > 0.0 {
-            thrust_magnitude *= AFTERBURNER_MULTIPLIER;
-            self.afterburner_fuel = (self.afterburner_fuel - AFTERBURNER_DRAIN * dt).max(0.0);
-        } else {
-            self.afterburner_fuel = (self.afterburner_fuel + AFTERBURNER_REGEN * dt).min(1.0);
+        // Wrap rotation to keep it in [-PI, PI] range
+        use std::f32::consts::PI;
+        while self.rotation > PI {
+            self.rotation -= 2.0 * PI;
+        }
+        while self.rotation < -PI {
+            self.rotation += 2.0 * PI;
         }
         
-        // Apply forward thrust
-        self.thrust = forward_dir * thrust_magnitude;
+        // Update banking based on strafing
+        let strafe_input = (left as i32 - right as i32) as f32;
+        let target_banking = -strafe_input * 0.4;  // Bank when strafing
+        self.banking = self.banking * 0.7 + target_banking * 0.3;
         
-        // Add vertical thrust
+        // Calculate movement directions including pitch
+        let yaw_cos = self.rotation.cos();
+        let yaw_sin = self.rotation.sin();
+        let pitch_cos = self.pitch.cos();
+        let pitch_sin = self.pitch.sin();
+        
+        // Forward direction includes pitch
+        let forward_dir = Vec3::new(
+            -yaw_sin * pitch_cos,
+            pitch_sin,  // Positive pitch should give positive Y (up)
+            -yaw_cos * pitch_cos
+        );
+        
+        // Right direction remains horizontal
+        let right_dir = Vec3::new(yaw_cos, 0.0, -yaw_sin);
+        
+        // Reset thrust
+        self.thrust = Vec3::ZERO;
+        
+        // Apply forward/backward thrust
+        let mut forward_thrust = 0.0;
+        if forward {
+            forward_thrust += THRUST_POWER;
+        }
+        if backward {
+            forward_thrust -= THRUST_POWER * 0.7; // Slightly slower backwards
+        }
+        
+        // Apply boost multiplier
+        if boost && forward_thrust > 0.0 {
+            forward_thrust *= BOOST_MULTIPLIER;
+        }
+        
+        self.thrust += forward_dir * forward_thrust;
+        
+        // Apply strafe thrust
+        if left {
+            self.thrust += right_dir * STRAFE_POWER;
+        }
+        if right {
+            self.thrust -= right_dir * STRAFE_POWER;
+        }
+        
+        // Apply vertical thrust
         if up {
-            self.thrust.y -= VERTICAL_THRUST;
-        }
-        if down {
-            self.thrust.y += VERTICAL_THRUST;
+            self.thrust.y += THRUST_POWER; // Go up
         }
         
         // Apply thrust to velocity
         self.vel += self.thrust * dt;
         
-        // Apply drag (more when braking)
-        self.braking = self.thrust.length() < 0.1 && (left || right || up || down);
-        let drag = if self.braking { BRAKE_DRAG } else { AIR_DRAG };
+        // Apply drag - more when not thrusting (hover behavior)
+        let drag = if self.thrust.length() < 0.1 { HOVER_DRAG } else { AIR_DRAG };
         self.vel *= 1.0 - (drag * dt);
         
-        // Apply gravity
-        self.vel.y -= GRAVITY * dt;
+        // Apply gravity - DISABLED
+        // self.vel.y -= GRAVITY * dt;
         
         // Limit speeds
         let horizontal_speed = Vec3::new(self.vel.x, 0.0, self.vel.z).length();
@@ -143,14 +239,14 @@ impl Player {
         }
         
         // Max altitude (above sea level, not terrain)
-        const MAX_ALTITUDE: f32 = 1000.0;
+        const MAX_ALTITUDE: f32 = 3000.0;
         if self.pos.y > MAX_ALTITUDE {
             self.pos.y = MAX_ALTITUDE;
             self.vel.y = self.vel.y.min(0.0);
         }
         
         // Update trail
-        self.update_trail(dt, boost);
+        self.update_trail(dt, boost && forward);
         
         // Update shield recharge
         if self.shield_recharge_timer > 0.0 {
@@ -189,7 +285,7 @@ impl Player {
         }
     }
     
-    fn update_trail(&mut self, dt: f32, boost: bool) {
+    fn update_trail(&mut self, dt: f32, boosting: bool) {
         // Update existing trail points
         self.trail_points.retain_mut(|point| {
             point.lifetime -= dt;
@@ -212,7 +308,7 @@ impl Player {
             let right_pos = self.pos + right_wing_offset;
             
             // Add trail points with longer lifetime when boosting
-            let lifetime = if boost { 0.6 } else { 0.3 };
+            let lifetime = if boosting { 0.8 } else { 0.3 };
             
             self.trail_points.push(TrailPoint {
                 pos: left_pos,
