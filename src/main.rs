@@ -954,7 +954,7 @@ impl EventHandler for Stage {
             
             // Project crosshair into 3D space in front of ship, then back to screen
             // This makes the crosshair feel like it's attached to a point in space
-            let aim_distance = 200.0; // Distance in front of ship
+            let aim_distance = 400.0; // Distance in front of ship
             
             // Get ship's forward direction with mouse influence
             let mouse_yaw_offset = self.input.mouse_target_x * 0.5; // How much mouse affects aim
