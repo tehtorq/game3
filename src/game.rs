@@ -5,33 +5,9 @@ use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
 use crate::mine::Mine;
 
-// Calculate terrain height at a given position (matches shader calculation)
+// Use the same terrain height calculation as the Terrain module for consistency
 fn terrain_height_at(x: f32, z: f32) -> f32 {
-    let base_y = 20.0;
-    
-    // Large-scale terrain features
-    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
-    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
-    
-    // Gentle slopes
-    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
-    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
-    
-    // Roughness
-    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
-    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
-    roughness = (roughness + 1.5) / 3.0;
-    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
-    
-    // Bumpy details
-    let mut bumps = 0.0;
-    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
-    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
-    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
-    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
-    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
-    
-    base_y + large_scale + gentle + (bumps * roughness)
+    crate::terrain::Terrain::height_at(x, z)
 }
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::Particle;
@@ -53,6 +29,7 @@ pub struct Game {
     pub player_invulnerable_timer: f32,  // Brief invulnerability after being hit
     pub player_slowed: bool,  // Disruptor effect
     pub player_slow_timer: f32,
+    pub position_log_timer: f32,  // Timer for logging player position
 }
 
 impl Game {
@@ -71,6 +48,7 @@ impl Game {
             player_invulnerable_timer: 0.0,
             player_slowed: false,
             player_slow_timer: 0.0,
+            position_log_timer: 0.0,
         };
         
         // Generate initial bases around the map
@@ -92,6 +70,14 @@ impl Game {
             if self.player_slow_timer <= 0.0 {
                 self.player_slowed = false;
             }
+        }
+        
+        // Log player position every second
+        self.position_log_timer += dt;
+        if self.position_log_timer >= 1.0 {
+            println!("Player position: ({:.1}, {:.1}, {:.1})", 
+                self.player.pos.x, self.player.pos.y, self.player.pos.z);
+            self.position_log_timer = 0.0;
         }
         
         // Handle shooting
@@ -234,6 +220,11 @@ impl Game {
             let terrain_height = terrain_height_at(bullet.pos.x, bullet.pos.z);
             if bullet.pos.y < terrain_height {
                 terrain_hits.push((i, bullet.pos));
+                // Debug log when a player bullet hits terrain
+                if matches!(bullet.bullet_type, BulletType::Player) {
+                    println!("Player bullet hit terrain at ({:.1}, {:.1}, {:.1}), terrain height: {:.1}", 
+                        bullet.pos.x, bullet.pos.y, bullet.pos.z, terrain_height);
+                }
             }
         }
         
@@ -444,7 +435,17 @@ impl Game {
             // Higher waves spawn bases further from center
             let min_distance = 5000.0 + (self.wave as f32 * 2000.0);
             let max_distance = min_distance + 15000.0;
-            let distance = rng.gen_range(min_distance..max_distance.min(MAP_SIZE * 0.8));
+            
+            // Ensure we don't exceed map bounds and always have a valid range
+            let clamped_min = min_distance.min(MAP_SIZE * 0.7);
+            let clamped_max = max_distance.min(MAP_SIZE * 0.8);
+            
+            // If min exceeds max, just use a fixed distance near the max
+            let distance = if clamped_min >= clamped_max {
+                clamped_max * 0.9
+            } else {
+                rng.gen_range(clamped_min..clamped_max)
+            };
             let angle = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
             let x = angle.cos() * distance;
             let z = angle.sin() * distance;
@@ -470,14 +471,23 @@ impl Game {
     fn spawn_enemies_from_base_data(&mut self, base_pos: Vec3, enemy_types: Vec<EnemyType>, routes: Vec<Vec<Vec3>>) {
         let mut rng = thread_rng();
         
-        // Spawn 5-8 enemies per spawn cycle - much more aggressive
-        let spawn_count = rng.gen_range(5..=8);
+        // Spawn fewer enemies per cycle to reduce clustering
+        let spawn_count = rng.gen_range(2..=4);
         
         for i in 0..spawn_count {
             if let Some(enemy_type) = enemy_types.choose(&mut rng) {
-                // Spawn enemy near base
-                let angle = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
-                let spawn_offset = Vec3::new(angle.cos() * 100.0, 50.0, angle.sin() * 100.0);
+                // Spawn enemies with better spacing to prevent clustering
+                // Use a larger base radius and vary it per enemy
+                let base_radius = 200.0 + (i as f32 * 50.0);
+                let angle = (i as f32 / spawn_count as f32) * std::f32::consts::PI * 2.0 + rng.gen_range(-0.2..0.2);
+                
+                // Vary the height more to prevent vertical clustering
+                let height_offset = 50.0 + rng.gen_range(0.0..50.0);
+                let spawn_offset = Vec3::new(
+                    angle.cos() * base_radius, 
+                    height_offset, 
+                    angle.sin() * base_radius
+                );
                 let spawn_pos = base_pos + spawn_offset;
                 
                 let mut enemy = Enemy::new(spawn_pos.x, spawn_pos.z, *enemy_type);

@@ -1142,6 +1142,7 @@ impl EventHandler for Stage {
     fn mouse_button_down_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
         match button {
             MouseButton::Left => self.input.shoot = true,
+            MouseButton::Right => self.input.forward = true,
             _ => {}
         }
     }
@@ -1149,6 +1150,7 @@ impl EventHandler for Stage {
     fn mouse_button_up_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
         match button {
             MouseButton::Left => self.input.shoot = false,
+            MouseButton::Right => self.input.forward = false,
             _ => {}
         }
     }

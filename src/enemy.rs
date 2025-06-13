@@ -88,6 +88,17 @@ pub struct Enemy {
     spawn_timer: f32,       // Carrier spawn timer
     reflection_active: bool,// Reflector state
     vortex_strength: f32,   // Current vortex pull strength
+    // Stuck detection fields
+    last_position: Vec3,    // Position from last frame
+    stuck_timer: f32,       // How long we've been stuck
+    stuck_threshold: f32,   // Movement threshold to consider stuck
+    // Combat maneuvering fields
+    combat_maneuver_timer: f32,  // Timer for changing maneuvers
+    combat_maneuver_type: i32,   // Current maneuver type (0=approach, 1=strafe_left, 2=strafe_right, 3=circle, 4=retreat)
+    preferred_combat_distance: f32, // Ideal distance to maintain from player
+    zigzag_phase: f32,           // Phase for zigzag movement
+    zigzag_direction: f32,       // Current zigzag direction (-1 or 1)
+    close_range_angle: f32,      // Random movement angle when very close
 }
 
 
@@ -236,6 +247,28 @@ impl Enemy {
                 EnemyType::Vortex => 300.0,
                 _ => 0.0,
             },
+            // Initialize stuck detection
+            last_position: Vec3::new(x, spawn_height, z),
+            stuck_timer: 0.0,
+            stuck_threshold: 5.0, // Consider stuck if moved less than 5 units
+            // Initialize combat maneuvering
+            combat_maneuver_timer: 0.0,
+            combat_maneuver_type: 0,
+            preferred_combat_distance: {
+                let base_distance = match enemy_type {
+                    EnemyType::Pyramid => 300.0,     // Fast attackers stay closer
+                    EnemyType::Hunter => 400.0,      // Mid-range
+                    EnemyType::Guardian => 500.0,    // Defensive, longer range
+                    EnemyType::Laser => 600.0,       // Long range
+                    EnemyType::Phaser => 800.0,      // Sniper range
+                    _ => 350.0,                     // Default
+                };
+                // Add individual variation of ±20%
+                base_distance * rng.gen_range(0.8..1.2)
+            },
+            zigzag_phase: rng.gen_range(0.0..PI * 2.0),
+            zigzag_direction: if rng.gen_bool(0.5) { 1.0 } else { -1.0 },
+            close_range_angle: rng.gen_range(0.0..PI * 2.0),
         }
     }
     
@@ -256,6 +289,110 @@ impl Enemy {
     pub fn update(&mut self, dt: f32) {
         self.rotation += self.rotation_speed * dt;
         self.phase += dt;
+    }
+    
+    fn calculate_combat_movement(&mut self, player_pos: Vec3, distance_to_player: f32, dt: f32) -> Vec3 {
+        let mut rng = thread_rng();
+        
+        // Define close range threshold
+        let close_range_threshold = 150.0;
+        
+        // Update maneuver timer
+        self.combat_maneuver_timer -= dt;
+        if self.combat_maneuver_timer <= 0.0 {
+            // Change maneuver
+            self.combat_maneuver_timer = rng.gen_range(1.0..3.0);
+            
+            if distance_to_player < close_range_threshold {
+                // Very close - random evasive movements
+                self.combat_maneuver_type = 5; // New close-range mode
+                self.close_range_angle = rng.gen_range(0.0..PI * 2.0);
+            } else if distance_to_player < self.preferred_combat_distance * 0.7 {
+                // Too close, prefer evasive maneuvers
+                self.combat_maneuver_type = rng.gen_range(1..=4);
+            } else if distance_to_player > self.preferred_combat_distance * 1.5 {
+                // Too far, approach
+                self.combat_maneuver_type = 0;
+            } else {
+                // Good distance, mix it up
+                self.combat_maneuver_type = rng.gen_range(0..=3);
+            }
+        }
+        
+        let to_player = player_pos - self.pos;
+        let to_player_normalized = to_player.normalize_or_zero();
+        
+        // Calculate height difference for vertical tracking
+        let height_diff = player_pos.y - self.pos.y;
+        let vertical_tracking = height_diff.clamp(-self.speed * 0.5, self.speed * 0.5);
+        
+        // Calculate base movement based on maneuver type
+        let base_movement = match self.combat_maneuver_type {
+            0 => {
+                // Longer zigzag approach
+                self.zigzag_phase += dt * 1.5; // Slower frequency for longer zigzags
+                
+                // Change direction less frequently for longer runs
+                if self.zigzag_phase % (PI * 2.0) < 0.1 {
+                    self.zigzag_direction *= -1.0;
+                }
+                
+                let perpendicular = Vec3::new(-to_player_normalized.z, 0.0, to_player_normalized.x);
+                let zigzag_amplitude = 150.0; // Larger amplitude
+                let zigzag_offset = perpendicular * (self.zigzag_direction * zigzag_amplitude);
+                
+                // Blend approach with zigzag
+                to_player_normalized * 0.7 + zigzag_offset.normalize_or_zero() * 0.5
+            },
+            1 => {
+                // Strafe left
+                let left = Vec3::new(-to_player_normalized.z, 0.0, to_player_normalized.x);
+                left + to_player_normalized * 0.2
+            },
+            2 => {
+                // Strafe right
+                let right = Vec3::new(to_player_normalized.z, 0.0, -to_player_normalized.x);
+                right + to_player_normalized * 0.2
+            },
+            3 => {
+                // Circle around player
+                let tangent = Vec3::new(-to_player.z, 0.0, to_player.x).normalize_or_zero();
+                let radius_correction = if distance_to_player < self.preferred_combat_distance {
+                    -to_player_normalized * 0.3
+                } else {
+                    to_player_normalized * 0.3
+                };
+                tangent + radius_correction
+            },
+            4 => {
+                // Tactical retreat with evasion
+                let retreat = -to_player_normalized;
+                let dodge = Vec3::new(
+                    (self.phase * 2.0).sin() * 0.5,
+                    0.0,
+                    (self.phase * 2.0).cos() * 0.5
+                );
+                retreat + dodge
+            },
+            5 => {
+                // Close range random movement
+                self.close_range_angle += rng.gen_range(-1.0..1.0) * dt * 3.0;
+                let random_dir = Vec3::new(
+                    self.close_range_angle.cos(),
+                    0.0,
+                    self.close_range_angle.sin()
+                );
+                // Mix random movement with slight player tracking
+                random_dir * 0.8 + to_player_normalized * 0.2
+            },
+            _ => to_player_normalized,
+        };
+        
+        // Combine horizontal movement with vertical tracking
+        let mut movement = base_movement * self.speed * self.aggression;
+        movement.y = vertical_tracking + (self.phase * 0.8).sin() * 10.0; // Track height + small variation
+        
+        movement
     }
     
     pub fn update_with_player(&mut self, player_pos: Vec3, dt: f32) -> Option<Vec3> {
@@ -315,6 +452,13 @@ impl Enemy {
                 
                 // Movement based on alert state
                 match self.alert_state {
+                    AlertState::Alert if distance_to_player < self.preferred_combat_distance * 1.5 => {
+                        // Use combat maneuvering when engaged
+                        let combat_vel = self.calculate_combat_movement(player_pos, distance_to_player, dt);
+                        self.vel.x = combat_vel.x;
+                        self.vel.z = combat_vel.z;
+                        self.vel.y = height_diff * 2.0 + combat_vel.y * 0.5; // Blend altitude maintenance
+                    }
                     AlertState::Searching => {
                         // Move towards last known player position
                         let to_search = self.last_known_player_pos - self.pos;
@@ -379,17 +523,30 @@ impl Enemy {
                     let climb_target = terrain_height + 150.0;
                     self.vel.y = (climb_target - self.pos.y).clamp(-self.speed, self.speed);
                     
-                    // Move towards player horizontally during climb
+                    // Move towards player horizontally during climb with evasion
                     if distance_to_player < self.detection_range {
-                        let horizontal = Vec3::new(to_player.x, 0.0, to_player.z).normalize_or_zero();
-                        self.vel.x = horizontal.x * self.speed * 0.5;
-                        self.vel.z = horizontal.z * self.speed * 0.5;
+                        if self.alert_state == AlertState::Alert && distance_to_player < self.preferred_combat_distance {
+                            // Use combat maneuvering during climb
+                            let combat_vel = self.calculate_combat_movement(player_pos, distance_to_player, dt);
+                            self.vel.x = combat_vel.x * 0.7; // Slower horizontal during climb
+                            self.vel.z = combat_vel.z * 0.7;
+                        } else {
+                            let horizontal = Vec3::new(to_player.x, 0.0, to_player.z).normalize_or_zero();
+                            self.vel.x = horizontal.x * self.speed * 0.5;
+                            self.vel.z = horizontal.z * self.speed * 0.5;
+                        }
                     }
                 } else {
-                    // Diving phase
+                    // Diving phase with spiral
                     if distance_to_player < self.detection_range {
-                        // Dive towards player
-                        let dive_target = player_pos + Vec3::new(0.0, -20.0, 0.0);
+                        // Spiral dive towards player
+                        let spiral_angle = self.phase * 5.0;
+                        let spiral_offset = Vec3::new(
+                            spiral_angle.cos() * 30.0,
+                            0.0,
+                            spiral_angle.sin() * 30.0
+                        );
+                        let dive_target = player_pos + Vec3::new(0.0, -20.0, 0.0) + spiral_offset;
                         let to_target = dive_target - self.pos;
                         self.vel = to_target.normalize_or_zero() * self.speed * 1.5;
                     } else {
@@ -407,33 +564,26 @@ impl Enemy {
                     self.last_known_player_pos
                 };
                 
-                let to_target = target_pos - self.pos;
-                let distance_to_target = to_target.length();
+                let distance_to_target = (target_pos - self.pos).length();
                 
-                // Hunt the target
-                if distance_to_target > 50.0 {
-                    // Lead the target
-                    let _lead_time = distance_to_target / self.speed * 0.5;
-                    let predicted_pos = target_pos; // Could add player velocity prediction here
-                    
-                    let to_pred_target = predicted_pos - self.pos;
-                    // Speed increases with alert level
+                // Use combat maneuvering when engaged
+                if self.alert_state == AlertState::Alert && distance_to_player < self.detection_range {
+                    self.vel = self.calculate_combat_movement(player_pos, distance_to_player, dt);
+                } else {
+                    // Normal approach when not in combat
+                    let to_target = target_pos - self.pos;
                     let speed_mult = match self.alert_state {
                         AlertState::Alert => 1.2,
                         AlertState::Searching => 0.9,
                         _ => 0.7,
                     };
-                    self.vel = to_pred_target.normalize_or_zero() * self.speed * self.aggression * speed_mult;
-                    
-                    // Maintain some altitude
-                    let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
-                    if self.pos.y < terrain_height + 30.0 {
-                        self.vel.y = (self.vel.y + 50.0).max(0.0);
-                    }
-                } else {
-                    // Circle when too close
-                    let tangent = Vec3::new(-to_target.z, 0.0, to_target.x).normalize_or_zero();
-                    self.vel = tangent * self.speed * 0.8;
+                    self.vel = to_target.normalize_or_zero() * self.speed * self.aggression * speed_mult;
+                }
+                
+                // Maintain some altitude
+                let terrain_height = Terrain::height_at(self.pos.x, self.pos.z);
+                if self.pos.y < terrain_height + 30.0 {
+                    self.vel.y = (self.vel.y + 50.0).max(0.0);
                 }
             },
             
@@ -512,33 +662,27 @@ impl Enemy {
                     let distance_to_waypoint = to_target.length();
                     
                     // Check if we've reached the waypoint
-                    if distance_to_waypoint < 30.0 {
+                    if distance_to_waypoint < 50.0 {
                         // Move to next waypoint
-                        self.current_waypoint = (self.current_waypoint + 1) % self.patrol_waypoints.len();
-                    }
-                    
-                    // Move towards current waypoint
-                    if distance_to_waypoint > 5.0 {
+                        self.current_waypoint = self.current_waypoint + 1;
+                        
+                        // If we've reached the end of the patrol route, convert to tracking behavior
+                        if self.current_waypoint >= self.patrol_waypoints.len() {
+                            self.movement_pattern = MovementPattern::Tracking;
+                            self.vel = Vec3::ZERO;
+                        }
+                    } else {
+                        // Move towards waypoint only if we're far enough away
                         self.vel = to_target.normalize_or_zero() * self.speed * 1.5; // Faster patrol
                     }
                     
-                    // React to player if detected
-                    if distance_to_player < self.detection_range {
-                        // Break patrol to pursue player
-                        let pursuit_strength = if distance_to_player < 200.0 { 1.0 } else { 0.5 };
-                        let pursuit_vel = to_player.normalize_or_zero() * self.speed * self.aggression * pursuit_strength;
-                        self.vel = self.vel * 0.5 + pursuit_vel * 0.5; // Blend patrol and pursuit
+                    // React to player if detected - switch to tracking immediately
+                    if distance_to_player < self.detection_range && self.alert_state == AlertState::Alert {
+                        self.movement_pattern = MovementPattern::Tracking;
                     }
                 } else {
-                    // Fallback if no waypoints - simple circular patrol
-                    let angle = self.phase * 0.1;
-                    self.target_point = self.spawn_point + Vec3::new(
-                        angle.cos() * 300.0,
-                        0.0,
-                        angle.sin() * 300.0
-                    );
-                    let to_target = self.target_point - self.pos;
-                    self.vel = to_target.normalize_or_zero() * self.speed * 0.7;
+                    // No waypoints - switch to tracking
+                    self.movement_pattern = MovementPattern::Tracking;
                 }
             },
         }
@@ -559,6 +703,38 @@ impl Enemy {
             self.pos.y = terrain_height + 10.0;
             self.vel.y = self.vel.y.max(0.0);
         }
+        
+        // Stuck detection and recovery
+        let movement_distance = (self.pos - self.last_position).length();
+        if movement_distance < self.stuck_threshold * dt && self.vel.length() > 10.0 {
+            // We're trying to move but not making progress
+            self.stuck_timer += dt;
+            
+            if self.stuck_timer > 2.0 {
+                // We've been stuck for 2 seconds, try to recover
+                match self.movement_pattern {
+                    MovementPattern::Patrol => {
+                        // Skip to next waypoint
+                        self.current_waypoint = (self.current_waypoint + 1) % self.patrol_waypoints.len();
+                        self.stuck_timer = 0.0;
+                    },
+                    _ => {
+                        // For other patterns, add random impulse
+                        let mut rng = thread_rng();
+                        self.vel.x += rng.gen_range(-50.0..50.0);
+                        self.vel.z += rng.gen_range(-50.0..50.0);
+                        self.vel.y += 20.0; // Move up a bit
+                        self.stuck_timer = 0.0;
+                    }
+                }
+            }
+        } else {
+            // We're moving fine, reset stuck timer
+            self.stuck_timer = 0.0;
+        }
+        
+        // Update last position for next frame
+        self.last_position = self.pos;
         
         // Check if we should attack - only when alert
         if self.alert_state == AlertState::Alert && self.can_attack && self.attack_cooldown <= 0.0 {

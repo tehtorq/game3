@@ -44,15 +44,24 @@ pub struct GroundTurret {
 
 impl Base {
     pub fn new(x: f32, z: f32, base_type: BaseType) -> Self {
-        let y = terrain_height_at(x, z) + 20.0; // Place base slightly above terrain
+        // Sample terrain around base location to ensure proper placement
+        let mut base_height = terrain_height_at(x, z);
+        let sample_radius = 50.0;
+        for i in 0..8 {
+            let angle = i as f32 * PI * 0.25;
+            let sample_x = x + angle.cos() * sample_radius;
+            let sample_z = z + angle.sin() * sample_radius;
+            base_height = base_height.max(terrain_height_at(sample_x, sample_z));
+        }
+        let y = base_height + 30.0; // Place base well above highest nearby terrain
         let pos = Vec3::new(x, y, z);
         
         // Create turrets based on base type
         let (turret_count, spawn_interval) = match base_type {
-            BaseType::Small => (2, 10.0),
-            BaseType::Medium => (4, 8.0),
-            BaseType::Large => (6, 5.0),
-            BaseType::Fortress => (8, 4.0),
+            BaseType::Small => (2, 20.0),    // Much slower enemy spawning
+            BaseType::Medium => (4, 16.0),
+            BaseType::Large => (6, 12.0),
+            BaseType::Fortress => (8, 10.0),
         };
         
         let mut turrets = Vec::new();
@@ -95,7 +104,21 @@ impl Base {
             let angle = i as f32 * PI * 2.0 / ground_turret_count as f32;
             let turret_x = x + angle.cos() * ground_turret_radius;
             let turret_z = z + angle.sin() * ground_turret_radius;
-            let turret_y = terrain_height_at(turret_x, turret_z) + 5.0; // Lower to ground
+            // Calculate terrain height and add extra clearance
+            let base_terrain_height = terrain_height_at(turret_x, turret_z);
+            
+            // Sample a few points around the turret to get max height
+            let sample_radius = 20.0;
+            let mut max_height = base_terrain_height;
+            for j in 0..4 {
+                let sample_angle = j as f32 * PI * 0.5;
+                let sample_x = turret_x + sample_angle.cos() * sample_radius;
+                let sample_z = turret_z + sample_angle.sin() * sample_radius;
+                let sample_height = terrain_height_at(sample_x, sample_z);
+                max_height = max_height.max(sample_height);
+            }
+            
+            let turret_y = max_height + 15.0; // Ensure turret is above highest nearby terrain
             
             ground_turrets.push(GroundTurret {
                 pos: Vec3::new(turret_x, turret_y, turret_z),
