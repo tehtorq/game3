@@ -74,7 +74,8 @@ impl Player {
     // Apply mouse aim - ship rotates to face mouse target
     pub fn apply_mouse_aim(&mut self, mouse_target_x: f32, mouse_target_y: f32, dt: f32) {
         const MAX_TURN_SPEED: f32 = 2.5; // Maximum rotation speed
-        const MAX_PITCH: f32 = 0.8; // Limit pitch to about 45 degrees
+        const MAX_PITCH_UP: f32 = 0.8; // Limit upward pitch to about 45 degrees
+        const MAX_PITCH_DOWN: f32 = 1.3; // Allow steeper downward pitch (about 74 degrees)
         const YAW_SENSITIVITY: f32 = 1.5; // How much the mouse affects yaw
         const PITCH_SENSITIVITY: f32 = 0.4; // Reduced pitch sensitivity
         const DEADZONE: f32 = 0.05; // Small deadzone to prevent oscillation
@@ -107,14 +108,19 @@ impl Player {
         let pitch_input = if mouse_target_y.abs() < PITCH_DEADZONE {
             0.0
         } else {
-            -mouse_target_y * MAX_PITCH * PITCH_SENSITIVITY
+            // Use different limits for up/down
+            let max_pitch = if mouse_target_y > 0.0 { MAX_PITCH_DOWN } else { MAX_PITCH_UP };
+            -mouse_target_y * max_pitch * PITCH_SENSITIVITY
         };
         
         // Smoothly adjust pitch towards target
         let target_pitch = pitch_input;
         let pitch_diff = target_pitch - self.pitch;
         let pitch_change = pitch_diff * 5.0 * dt; // Smooth pitch adjustment
-        self.pitch = (self.pitch + pitch_change).clamp(-MAX_PITCH, MAX_PITCH);
+        
+        // Clamp with different limits for up/down
+        let new_pitch = self.pitch + pitch_change;
+        self.pitch = new_pitch.clamp(-MAX_PITCH_DOWN, MAX_PITCH_UP);
     }
 
     pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, boost: bool, up: bool, dt: f32) {

@@ -79,7 +79,7 @@ impl Game {
         game
     }
 
-    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, dt: f32, sound_system: &mut crate::sounds::SoundSystem) {
         // Update player (slow effect would need to be implemented in player.rs)
         self.player.update(left, right, forward, backward, boost, up, dt);
         
@@ -134,6 +134,9 @@ impl Game {
             let mut bullet = Bullet::new_at_position(pos, dir, bullet_type);
             bullet.vel = dir * if is_heavy { 450.0 } else { 350.0 }; // Slightly slower for visibility
             self.bullets.push(bullet);
+            // Play turret sound (deeper for heavy turrets) with distance
+            let distance = (pos - self.player.pos).length();
+            sound_system.play_enemy_laser(if is_heavy { "Guardian" } else { "Vortex" }, Some(distance));
         }
         
         // Update enemies with player awareness and handle attacks
@@ -145,6 +148,9 @@ impl Game {
         for (i, enemy) in self.enemies.iter_mut().enumerate() {
             if let Some(attack_dir) = enemy.update_with_player(self.player.pos, dt) {
                 enemy_bullets.push(Bullet::new_enemy(enemy, attack_dir));
+                // Play enemy laser sound with position
+                let distance = (enemy.pos - self.player.pos).length();
+                sound_system.play_enemy_laser(&format!("{:?}", enemy.enemy_type), Some(distance));
             }
             
             // Track which enemies just became alerted

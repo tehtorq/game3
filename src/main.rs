@@ -21,6 +21,7 @@ mod camera;
 mod shader;
 mod game;
 mod constants;
+mod sounds;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
@@ -32,6 +33,7 @@ use game::Game;
 use terrain::Terrain;
 use terrain_cache::TerrainCache;
 use constants::*;
+use sounds::{SoundSystem, MusicState};
 
 #[derive(Parser)]
 #[command(name = "vector_shooter")]
@@ -86,6 +88,8 @@ struct Stage {
     fullscreen: bool,
     // Mouse capture state
     mouse_captured: bool,
+    // Sound system
+    sound_system: SoundSystem,
 }
 
 #[derive(Clone)]
@@ -261,6 +265,7 @@ impl Stage {
             last_frame_time: miniquad::date::now(),
             fullscreen: true,
             mouse_captured: true,
+            sound_system: SoundSystem::new(),
         };
         
         // Start in fullscreen with mouse captured
@@ -277,6 +282,21 @@ impl EventHandler for Stage {
     fn update(&mut self) {
         if !self.paused {
             let dt = 1.0 / 60.0;
+            
+            // Initialize sound system if needed
+            self.sound_system.init();
+            
+            // Update sound system
+            self.sound_system.update(dt);
+            
+            // Play shooting sound
+            if self.input.shoot && self.game.shoot_cooldown <= 0.0 {
+                self.sound_system.play_laser();
+            }
+            
+            // Store enemy count before update
+            let enemies_before = self.game.enemies.len();
+            
             // Apply mouse aim to player
             self.game.player.apply_mouse_aim(self.input.mouse_target_x, self.input.mouse_target_y, dt);
             
@@ -288,8 +308,44 @@ impl EventHandler for Stage {
                 self.input.shoot,
                 self.input.boost,
                 self.input.up,
-                dt
+                dt,
+                &mut self.sound_system
             );
+            
+            // Play explosion sounds for destroyed enemies
+            let enemies_after = self.game.enemies.len();
+            if enemies_after < enemies_before {
+                self.sound_system.play_explosion();
+            }
+            
+            // Determine music state based on enemy proximity
+            let mut music_state = MusicState::Peaceful;
+            let mut closest_enemy_dist = f32::MAX;
+            
+            for enemy in &self.game.enemies {
+                let dist = (enemy.pos - self.game.player.pos).length();
+                if dist < closest_enemy_dist {
+                    closest_enemy_dist = dist;
+                }
+                
+                // Check if enemy is actively attacking
+                if matches!(enemy.alert_state, AlertState::Alert) && dist < 1000.0 {
+                    music_state = MusicState::Combat;
+                    break;
+                }
+            }
+            
+            // Set music state based on distance if not in combat
+            if music_state != MusicState::Combat && closest_enemy_dist < 2000.0 {
+                music_state = MusicState::Suspense;
+            }
+            
+            self.sound_system.update_music(music_state, dt);
+            
+            // Update thruster sound based on player thrust
+            let is_thrusting = self.game.player.thrust.length() > 100.0; // Threshold for "significant" thrust
+            self.sound_system.update_thruster(is_thrusting);
+            
             // Update camera with smoothing
             self.camera.update(&self.game.player, dt);
         }
