@@ -123,7 +123,7 @@ impl Player {
         self.pitch = new_pitch.clamp(-MAX_PITCH_DOWN, MAX_PITCH_UP);
     }
 
-    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, boost: bool, up: bool, dt: f32) {
+    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, boost: bool, up: bool, down: bool, dt: f32) {
         // Physics constants
         const TURN_ACCELERATION: f32 = 8.0;  // For mouse turning
         const TURN_DAMPING: f32 = 0.9;      // Less damping for more responsive controls
@@ -202,6 +202,9 @@ impl Player {
         // Apply vertical thrust
         if up {
             self.thrust.y += THRUST_POWER; // Go up
+        }
+        if down {
+            self.thrust.y -= THRUST_POWER; // Go down
         }
         
         // Apply thrust to velocity

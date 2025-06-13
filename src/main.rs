@@ -115,6 +115,7 @@ struct InputState {
     shoot: bool,
     boost: bool,
     up: bool,
+    down: bool,  // Move down (opposite of up/space)
     mouse_target_x: f32,  // Mouse position relative to center (-1 to 1)
     mouse_target_y: f32,  // Mouse position relative to center (-1 to 1)
 }
@@ -308,6 +309,7 @@ impl EventHandler for Stage {
                 self.input.shoot,
                 self.input.boost,
                 self.input.up,
+                self.input.down,
                 dt,
                 &mut self.sound_system
             );
@@ -1088,6 +1090,7 @@ impl EventHandler for Stage {
             KeyCode::Up | KeyCode::W => self.input.forward = true,
             KeyCode::Down | KeyCode::S => self.input.backward = true,
             KeyCode::Space => self.input.up = true,
+            KeyCode::C => self.input.down = true,
             KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = true,
             KeyCode::Escape => window::request_quit(),
             KeyCode::P => self.paused = !self.paused,
@@ -1121,6 +1124,7 @@ impl EventHandler for Stage {
             KeyCode::Up | KeyCode::W => self.input.forward = false,
             KeyCode::Down | KeyCode::S => self.input.backward = false,
             KeyCode::Space => self.input.up = false,
+            KeyCode::C => self.input.down = false,
             KeyCode::LeftShift | KeyCode::RightShift => self.input.boost = false,
             _ => {}
         }

@@ -57,9 +57,9 @@ impl Game {
         game
     }
 
-    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, dt: f32, sound_system: &mut crate::sounds::SoundSystem) {
+    pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, down: bool, dt: f32, sound_system: &mut crate::sounds::SoundSystem) {
         // Update player (slow effect would need to be implemented in player.rs)
-        self.player.update(left, right, forward, backward, boost, up, dt);
+        self.player.update(left, right, forward, backward, boost, up, down, dt);
         
         // Update timers
         if self.player_invulnerable_timer > 0.0 {

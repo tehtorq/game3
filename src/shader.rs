@@ -32,226 +32,449 @@ uniform sampler2D height_texture;
 
 // Biome height generation functions
 float canyon_height(vec2 p) {
-    // Lower frequency for wider features
-    float scale1 = 0.0008;
-    float scale2 = 0.0004;
+    // River-like canyon systems with dramatic depth variations
+    float scale1 = 0.0015; // Main river course
+    float scale2 = 0.003;  // Tributaries
+    float scale3 = 0.006;  // Rapids and falls
+    float scale4 = 0.0005; // Canyon width variation
     
-    // Smooth rolling canyon
-    float base = sin(p.x * scale1) * cos(p.y * scale1 * 0.8) * 60.0;
-    float secondary = sin(p.x * scale2 + 1.0) * cos(p.y * scale2 * 1.2) * 40.0;
+    // Main river channel - continuous flowing pattern
+    float river_flow = sin(p.x * scale1) * 0.7 + cos(p.y * scale1 * 0.8) * 0.5;
+    float river_meander = (sin(p.x * scale1 * 0.5 + p.y * scale1 * 0.3) + 
+                          cos(p.x * scale1 * 0.3 - p.y * scale1 * 0.4)) * 0.4;
     
-    // Add some gentle valleys
-    float valley = 0.0;
-    valley += smoothstep(0.0, 1.0, sin(p.x * 0.001)) * 30.0;
-    valley += smoothstep(0.0, 1.0, cos(p.y * 0.0008)) * 20.0;
+    // Tributary channels joining the main river
+    float tributary1 = (sin(p.x * scale2 - p.y * scale2 * 0.6) + 
+                       cos(p.x * scale2 * 0.4 + p.y * scale2)) * 0.3;
+    float tributary2 = (sin(p.x * scale2 * 1.2 + p.y * scale2 * 0.5) * 
+                       cos(p.x * scale2 * 0.8 - p.y * scale2 * 0.7)) * 0.25;
     
-    // Gentle undulations instead of cliffs
-    float detail = sin(p.x * 0.005) * cos(p.y * 0.004) * 10.0;
+    // River confluence points - deeper where rivers meet
+    float confluence = (abs(tributary1 * river_flow) + abs(tributary2 * river_flow)) * 0.5;
     
-    return base + secondary - valley + detail;
+    // Canyon width varies like a real river
+    float width_pattern = sin(p.x * scale4 + p.y * scale4 * 0.7);
+    float canyon_width = 0.3 + abs(width_pattern) * 0.7 + confluence * 0.3;
+    
+    // River depth with pools and rapids
+    float pool_pattern = abs(sin(p.x * scale3) * cos(p.y * scale3 * 1.2));
+    float rapids = pow(abs(sin(p.x * scale3 * 2.0 + p.y * scale3 * 1.5)), 3.0) * 0.3;
+    
+    // Combine all river features
+    float river_depth = abs(river_flow + river_meander) * canyon_width + 
+                       abs(tributary1) * 0.5 + abs(tributary2) * 0.5 + 
+                       confluence + pool_pattern * 0.4 - rapids;
+    
+    // Create dramatic canyon walls with overhangs
+    float wall_slope = 1.5 + width_pattern * 0.5;
+    float canyon_cut = pow(abs(river_depth), wall_slope) * 2.0; // Deeper canyons
+    
+    // Terraced canyon walls
+    float terraces = max(floor(canyon_cut * 6.0) / 6.0, 0.0);
+    float final_depth = canyon_cut * 0.4 + terraces * 0.6;
+    
+    // High mesas between canyons
+    float mesa_height = (pow(sin(p.x * scale4 * 0.5), 2.0) + pow(cos(p.y * scale4 * 0.5), 2.0)) * 40.0;
+    float plateau_base = 200.0; // Base height for dramatic effect
+    
+    // Create dramatic height difference
+    return plateau_base + mesa_height - final_depth * 160.0;
 }
 
 float plateau_height(vec2 p) {
-    // Very low frequency for large, smooth plateaus
-    float scale1 = 0.0002;
-    float scale2 = 0.0003;
+    // Dramatic mesa and plateau formations with sheer cliffs
+    float scale1 = 0.0008;
+    float scale2 = 0.0005;
+    float scale3 = 0.002;
+    float scale4 = 0.0003;
     
-    // Smooth raised areas with tapered edges
-    float raise1 = smoothstep(0.2, 0.8, sin(p.x * scale1) * cos(p.y * scale1) * 0.5 + 0.5);
-    float raise2 = smoothstep(0.3, 0.7, sin(p.x * scale2 + 1.5) * cos(p.y * scale2 - 0.8) * 0.5 + 0.5);
+    // Create distinct mesa formations
+    float mesa1 = abs(sin(p.x * scale1) * cos(p.y * scale1 * 0.9));
+    float mesa2 = abs(sin(p.x * scale2 + 200.0) * cos(p.y * scale2 - 150.0));
+    float mesa3 = abs(cos(p.x * scale4 * 1.3) * sin(p.y * scale4 + 100.0));
     
-    // Gradual height changes
-    float h1 = raise1 * 60.0;
-    float h2 = raise2 * 40.0;
+    // Sharp cliff edges
+    float cliff_sharpness = 8.0; // Very sharp transitions
+    float mesa_top1 = mesa1 > 0.4 ? 1.0 : pow(mesa1 / 0.4, cliff_sharpness);
+    float mesa_top2 = mesa2 > 0.5 ? 1.0 : pow(mesa2 / 0.5, cliff_sharpness);
+    float mesa_top3 = mesa3 > 0.6 ? 1.0 : pow(mesa3 / 0.6, cliff_sharpness);
     
-    // Rolling surface
-    float surface = sin(p.x * 0.001) * cos(p.y * 0.0008) * 15.0;
+    // Dramatic height differences between plateau levels
+    float base_elevation = -50.0;
+    float tier1_height = 120.0;
+    float tier2_height = 180.0;
+    float tier3_height = 250.0;
     
-    // Gentle blend between heights
-    float blend = sin(p.x * 0.0001 + p.y * 0.00015) * 0.5 + 0.5;
+    // Calculate mesa heights
+    float h1 = base_elevation + mesa_top1 * tier1_height;
+    float h2 = base_elevation + mesa_top2 * tier2_height;
+    float h3 = base_elevation + mesa_top3 * tier3_height;
     
-    return mix(h1, h2, blend) + surface;
+    // Natural bridges and arches
+    float arch_pattern = abs(sin(p.x * scale3 + p.y * scale3 * 0.7) * 
+                            cos(p.x * scale3 * 1.2 - p.y * scale3 * 0.5));
+    float arch_cut = arch_pattern > 0.7 ? pow(arch_pattern, 4.0) * -50.0 : 0.0;
+    
+    // Rock spires and hoodoos
+    float spire_pattern = abs(sin(p.x * scale3 * 2.0) * cos(p.y * scale3 * 2.0));
+    float spires = pow(spire_pattern, 6.0) * 40.0;
+    
+    // Weathering and erosion patterns
+    float erosion = (sin(p.x * 0.01) + cos(p.y * 0.01)) * 10.0 * (1.0 - max(max(mesa_top1, mesa_top2), mesa_top3));
+    
+    // Combine all plateau features
+    float height = max(max(h1, h2), h3) + spires + arch_cut + erosion;
+    
+    // Add dramatic vertical relief
+    return clamp(height, -100.0, 350.0);
 }
 
 float crystalline_height(vec2 p) {
-    // Lower frequency for larger crystal formations
-    float scale1 = 0.002;
-    float scale2 = 0.004;
+    // Varied spiky crystal formations
+    float scale1 = 0.01;
+    float scale2 = 0.02;
+    float scale3 = 0.05;
+    float scale4 = 0.007;
     
-    // Smooth crystal clusters instead of sharp spikes
-    float cluster1 = smoothstep(0.3, 0.7, sin(p.x * scale1) * cos(p.y * scale1) * 0.5 + 0.5);
-    float cluster2 = smoothstep(0.4, 0.6, cos(p.x * scale2 + 1.0) * sin(p.y * scale2 - 0.5) * 0.5 + 0.5);
+    // Vary spike sharpness based on position
+    float sharpness1 = 0.8 + (sin(p.x * 0.001) * cos(p.y * 0.001) * 0.4);
+    float sharpness2 = 1.2 + (sin(p.x * 0.002 + 100.0) * cos(p.y * 0.002) * 0.6);
     
-    // Varied heights with smooth transitions
-    float h1 = cluster1 * 50.0;
-    float h2 = cluster2 * 35.0;
+    // Different crystal cluster patterns
+    float spike1 = pow(abs(sin(p.x * scale1) * cos(p.y * scale1)), sharpness1) * 150.0;
+    float spike2 = pow(abs(cos(p.x * scale2 + 50.0) * sin(p.y * scale2 - 30.0)), sharpness2) * 105.0;
+    float spike3 = abs(sin(p.x * scale3 - 20.0) * cos(p.y * scale3 + 40.0)) * 60.0;
     
-    // Gentle crystalline texture
-    float texture = abs(sin(p.x * 0.01) * cos(p.y * 0.008)) * 20.0;
+    // Add larger crystal formations
+    float large_crystal = sqrt(pow(sin(p.x * scale4), 2.0) + pow(cos(p.y * scale4), 2.0));
+    float crystal_height = pow(max(1.0 - large_crystal, 0.0), 1.5) * 120.0;
     
-    // Smooth base elevation
-    float base = sin(p.x * 0.0005) * cos(p.y * 0.0004) * 25.0;
+    // Base elevation variation
+    float base_variation = sin(p.x * 0.003) * cos(p.y * 0.003) * 15.0;
     
-    return h1 + h2 + texture + base;
+    float height = spike1 + spike2 + spike3 + crystal_height + base_variation;
+    return clamp(height, -100.0, 400.0);
 }
 
 float volcanic_height(vec2 p) {
-    // Low frequency for broad volcanic features
-    float scale1 = 0.0002;
-    float scale2 = 0.0005;
+    // Rough terrain with crater-like formations
+    float scale1 = 0.004;
+    float scale2 = 0.008;
+    float scale3 = 0.002;
+    float scale4 = 0.001;
     
-    // Smooth volcanic cone with gentle slopes
-    float dist = length(vec2(sin(p.x * scale1), cos(p.y * scale1)));
-    float cone = smoothstep(1.0, 0.0, dist) * 80.0;
+    // Multiple volcanic craters with varying sizes
+    float crater1 = sqrt(pow(sin(p.x * scale1), 2.0) + pow(cos(p.y * scale1), 2.0));
+    float crater2 = sqrt(pow(sin(p.x * scale3 + 100.0), 2.0) + pow(cos(p.y * scale3 - 50.0), 2.0));
+    float crater3 = sqrt(pow(sin(p.x * scale4 * 1.5), 2.0) + pow(cos(p.y * scale4 * 1.2), 2.0));
     
-    // Rolling lava fields
-    float fields = sin(p.x * scale2) * cos(p.y * scale2 * 0.9) * 25.0;
+    // Dramatic volcanic cones
+    float h1 = (1.0 - crater1) * 180.0;
+    float h2 = (1.0 - crater2) * 120.0;
+    float h3 = (1.0 - crater3) * 250.0; // Main massive volcano
     
-    // Gentle surface texture
-    float texture = sin(p.x * 0.002) * cos(p.y * 0.0018) * 10.0;
+    // Rough lava flows and volcanic debris
+    float rough = sin(p.x * scale2) * cos(p.y * scale2) * 80.0;
+    float lava_flow = abs(sin(p.x * 0.003 + p.y * 0.002)) * 40.0;
     
-    return cone + fields + texture;
+    // Caldera formations
+    float caldera = crater1 < 0.3 ? -60.0 : 0.0;
+    float caldera2 = crater3 < 0.4 ? -80.0 : 0.0;
+    
+    // Volcanic ridges and fissures
+    float ridge = pow(abs(sin(p.x * 0.005 - p.y * 0.003)), 2.0) * 60.0;
+    
+    float base_height = max(max(h1, h2), h3) + rough + lava_flow + ridge + caldera + caldera2;
+    return clamp(base_height, -150.0, 350.0);
 }
 
 float mountain_height(vec2 p) {
-    // Much lower frequency for broader mountains
-    float scale1 = 0.0002;
-    float scale2 = 0.0004;
+    // Dramatic mountain ranges with connected peaks and ridgelines
+    float scale1 = 0.0008;  // Major range direction
+    float scale2 = 0.0015;  // Individual peaks
+    float scale3 = 0.0003;  // Range backbone
+    float scale4 = 0.004;   // Rocky details
+    float scale5 = 0.0001;  // Continental scale
     
-    // Smooth gaussian-like peaks instead of sharp ones
-    float dist1 = length(vec2(sin(p.x * scale1), cos(p.y * scale1)));
-    float dist2 = length(vec2(sin(p.x * scale2 + 1.0), cos(p.y * scale2 - 0.5)));
+    // Major mountain range ridgeline - continuous spine
+    float range_angle = 0.4; // Northwest to southeast trend
+    float ridge_main = pow(sin(p.x * scale3 * cos(range_angle) + p.y * scale3 * sin(range_angle)) * 0.5 + 0.5, 3.0);
+    float ridge_secondary = pow(cos(p.x * scale3 * 1.2 - p.y * scale3 * 0.7) * 0.5 + 0.5, 2.5);
     
-    // Use gaussian falloff for smooth peaks
-    float h1 = exp(-dist1 * dist1 * 2.0) * 120.0;
-    float h2 = exp(-dist2 * dist2 * 3.0) * 80.0;
+    // Connected peak system along the ridges
+    float peak_spacing = 0.0012;
+    float peak_line1 = sqrt(pow(sin(p.x * peak_spacing * cos(range_angle) + p.y * peak_spacing * sin(range_angle)), 2.0) + 
+                           pow(cos(p.x * peak_spacing * sin(range_angle) - p.y * peak_spacing * cos(range_angle)), 2.0));
+    float peak_line2 = sqrt(pow(sin(p.x * peak_spacing * 1.3 + 100.0), 2.0) + 
+                           pow(cos(p.y * peak_spacing * 1.3 - 50.0), 2.0));
     
-    // Rolling foothills
-    float foothills = 0.0;
-    foothills += sin(p.x * 0.0008) * cos(p.y * 0.0007) * 30.0;
-    foothills += sin(p.x * 0.0012 + 0.5) * sin(p.y * 0.001) * 20.0;
+    // Create dramatic pointed peaks
+    float peak_sharpness = 2.5; // Higher = sharper peaks
+    float h1 = pow(max(1.0 - peak_line1, 0.0), peak_sharpness) * 270.0;
+    float h2 = pow(max(1.0 - peak_line2, 0.0), peak_sharpness * 0.8) * 225.0;
     
-    // Gentle valleys between peaks
-    float valley = sin(p.x * 0.0003 + p.y * 0.0002) * 15.0;
+    // Ridge height variations - peaks are higher along the ridge
+    float ridge_height = ridge_main * 180.0 + ridge_secondary * 120.0;
     
-    return h1 + h2 + foothills + valley;
+    // Deep valleys between ridges
+    float valley_pattern = sin(p.x * scale2 + p.y * scale2 * 0.6) + 
+                          cos(p.x * scale2 * 0.8 - p.y * scale2 * 0.5);
+    float valley_depth = pow(abs(valley_pattern), 2.0) * -60.0;
+    
+    // Dramatic cliffs and rock faces
+    float cliff_pattern = abs(sin(p.x * scale4) * cos(p.y * scale4 * 1.2));
+    float cliffs = pow(cliff_pattern, 4.0) * 80.0;
+    
+    // Snow fields and glacial valleys
+    float glacial_valley = pow(abs(sin(p.x * scale2 * 0.5 + p.y * scale2 * 0.7)), 0.5) * -40.0;
+    float snow_cap = max(h1 + h2 + ridge_height, 225.0) * 0.2;
+    
+    // Foothills that gradually rise to meet the mountains
+    float distance_to_ridge = min(abs(ridge_main - 0.5) + abs(ridge_secondary - 0.5), 1.0);
+    float foothill_height = pow(1.0 - distance_to_ridge, 0.5) * 60.0;
+    
+    // Continental mountain building
+    float tectonic = (sin(p.x * scale5) + cos(p.y * scale5 * 0.8)) * 45.0;
+    
+    float height = ridge_height + h1 + h2 + valley_depth + cliffs + 
+                  glacial_valley + snow_cap + foothill_height + tectonic;
+                  
+    // Ensure dramatic height variations
+    return clamp(height, -250.0, 450.0);
 }
 
 float plains_height(vec2 p) {
-    // Very low frequency for gentle rolling plains
-    float scale1 = 0.0002;
-    float scale2 = 0.0004;
+    // Rolling plains with more variation
+    float scale1 = 0.002;
+    float scale2 = 0.007;
+    float scale3 = 0.015;
     
-    // Gentle rolling hills
-    float h1 = sin(p.x * scale1) * cos(p.y * scale1 * 0.8) * 25.0;
-    float h2 = sin(p.x * scale2 + 1.0) * cos(p.y * scale2 * 1.2) * 15.0;
+    // Larger rolling hills
+    float h1 = sin(p.x * scale1) * cos(p.y * scale1) * 40.0;
+    float h2 = sin(p.x * scale2 + 100.0) * sin(p.y * scale2 + 100.0) * 20.0;
+    float h3 = cos(p.x * scale3 + 200.0) * cos(p.y * scale3 + 200.0) * 10.0;
     
-    // Subtle undulations
-    float detail = sin(p.x * 0.001) * sin(p.y * 0.0008) * 8.0;
+    // Add some occasional low ridges
+    float ridge = pow(abs(sin(p.x * 0.0005 + p.y * 0.0003)), 3.0) * 30.0;
     
-    return h1 + h2 + detail;
+    // Gentle valleys and depressions
+    float depression = smoothstep(0.6, 0.3, abs(sin(p.x * 0.0008) * cos(p.y * 0.0006))) * -20.0;
+    
+    return h1 + h2 + h3 + ridge + depression;
 }
 
 float desert_height(vec2 p) {
-    // Low frequency for large dune fields
-    float scale1 = 0.0003;
-    float scale2 = 0.0006;
+    // Sand dune formations with dramatic heights
+    float scale1 = 0.005;
+    float scale2 = 0.01;
+    float scale3 = 0.03;
     
-    // Smooth, rolling dunes
-    float dunes = smoothstep(0.3, 0.7, sin(p.x * scale1) * cos(p.y * scale1 * 1.2) * 0.5 + 0.5) * 30.0;
-    float secondary = sin(p.x * scale2 + 0.5) * cos(p.y * scale2 * 0.8) * 20.0;
+    // Large dramatic dunes
+    float dunes = abs(sin(p.x * scale1) * cos(p.y * scale1 * 1.2)) * 80.0;
     
-    // Gentle ripples
-    float ripples = sin(p.x * 0.003) * cos(p.y * 0.0025) * 5.0;
+    // Secondary dune fields
+    float secondary = cos(p.x * scale2 + 30.0) * sin(p.y * scale2 - 20.0) * 30.0;
     
-    return dunes + secondary + ripples;
+    // Sand ripples and waves
+    float ripples = sin(p.x * scale3) * cos(p.y * scale3) * 10.0;
+    
+    // Occasional rock outcroppings
+    float rocks = pow(abs(sin(p.x * 0.002) * cos(p.y * 0.002)), 4.0) * 60.0;
+    
+    // Wind-carved hollows
+    float hollows = smoothstep(0.7, 0.5, abs(sin(p.x * 0.004 + p.y * 0.003))) * -30.0;
+    
+    float height = -20.0 + dunes + secondary + ripples + rocks + hollows;
+    return clamp(height, -100.0, 200.0);
 }
 
 float arctic_height(vec2 p) {
-    // Low frequency for smooth, rolling ice sheets
-    float scale1 = 0.0003;
-    float scale2 = 0.0006;
+    // Dramatic glacial formations with towering ice
+    float scale1 = 0.005;
+    float scale2 = 0.015;
+    float scale3 = 0.03;
+    float scale4 = 0.002;
+    float scale5 = 0.0008;
     
-    // Smooth rolling glacial terrain
-    float glacial = sin(p.x * scale1) * cos(p.y * scale1 * 0.9) * 40.0;
-    float sheets = cos(p.x * scale2 + 0.5) * sin(p.y * scale2 * 1.1) * 30.0;
+    // Massive glacial sheets with dramatic elevation
+    float glacier_flow = (sin(p.x * scale5) + cos(p.y * scale5 * 0.7)) * 120.0;
+    float glacier_thickness = (pow(sin(p.x * scale5 * 0.5), 2.0) + pow(cos(p.y * scale5 * 0.5), 2.0)) * 90.0;
     
-    // Gentle ice dunes
-    float dunes = smoothstep(0.2, 0.8, sin(p.x * 0.001) * cos(p.y * 0.0008) * 0.5 + 0.5) * 25.0;
+    // Towering ice spires and seracs
+    float serac_sharpness = 3.0 + (sin(p.x * 0.001) * cos(p.y * 0.001) * 2.0);
+    float seracs = pow(abs(sin(p.x * scale2) * cos(p.y * scale2)), serac_sharpness) * 225.0;
     
-    // Subtle surface texture
-    float texture = sin(p.x * 0.008) * cos(p.y * 0.007) * 10.0;
+    // Massive icebergs and pressure ridges
+    float pressure_ridge1 = pow(abs(sin(p.x * scale1 + p.y * scale1 * 0.5)), 2.0) * 180.0;
+    float pressure_ridge2 = pow(abs(cos(p.x * scale1 * 0.8 - p.y * scale1 * 0.6)), 2.0) * 135.0;
     
-    // Very gentle crevasses
-    float crevasse = smoothstep(0.4, 0.6, sin(p.x * 0.002 + p.y * 0.0015)) * -15.0;
+    // Deep crevasses and moulins
+    float crevasse_pattern = sin(p.x * scale3) + cos(p.y * scale3 * 1.2);
+    float crevasse_depth = pow(abs(crevasse_pattern), 4.0) * 120.0;
+    float moulin = pow(abs(sin(p.x * scale2 * 2.0 + p.y * scale2 * 1.5) * 
+                          cos(p.x * scale2 * 1.5 - p.y * scale2 * 2.0)), 6.0) * -60.0;
     
-    return glacial + sheets + dunes + texture + crevasse;
+    // Ice caverns and tunnels
+    float cave_pattern = abs(sin(p.x * scale4) * cos(p.y * scale4 * 0.8));
+    float ice_caves = cave_pattern > 0.6 ? pow(cave_pattern, 3.0) * -40.0 : 0.0;
+    
+    // Frozen waterfalls and ice walls
+    float ice_wall = pow(abs(sin(p.x * scale1 * 0.3 + p.y * scale1 * 0.9)), 5.0) * 105.0;
+    
+    float height = -20.0 + glacier_flow + glacier_thickness + 
+                  seracs + pressure_ridge1 + pressure_ridge2 + ice_wall - 
+                  crevasse_depth + moulin + ice_caves;
+                  
+    return clamp(height, -150.0, 420.0);
 }
 
 float badlands_height(vec2 p) {
-    // Low frequency for wider, smoother features
-    float scale1 = 0.0004;
-    float scale2 = 0.0008;
+    // Dramatic eroded landscape with towering formations
+    float scale1 = 0.004;
+    float scale2 = 0.01;
+    float scale3 = 0.025;
+    float scale4 = 0.0015;
+    float scale5 = 0.0006;
     
-    // Smooth eroded hills
-    float hills = sin(p.x * scale1) * cos(p.y * scale1 * 0.8) * 50.0;
-    float erosion = smoothstep(0.3, 0.7, cos(p.x * scale2 + 0.7) * sin(p.y * scale2 * 1.2) * 0.5 + 0.5) * 30.0;
+    // Massive mesa formations with sheer cliffs
+    float mesa_pattern = abs(sin(p.x * scale1) * cos(p.y * scale1 * 0.8));
+    float mesa_height = mesa_pattern > 0.3 ? 
+        pow(mesa_pattern, 0.2) * 300.0 : 
+        mesa_pattern * 75.0;
     
-    // Gentle mesas with sloped sides
-    float mesa = smoothstep(0.2, 0.6, sin(p.x * 0.0003) * cos(p.y * 0.00025) * 0.5 + 0.5) * 40.0;
+    // Deep erosion channels and slot canyons
+    float erosion_main = sin(p.x * scale2) + cos(p.y * scale2 * 1.2);
+    float erosion_branch = sin(p.x * scale2 * 1.5 - p.y * scale2 * 0.7) * 
+                          cos(p.x * scale2 * 0.8 + p.y * scale2 * 1.3);
+    float slot_canyon = pow(abs(erosion_main), 3.0) * 80.0 + 
+                       pow(abs(erosion_branch), 4.0) * 60.0;
     
-    // Rolling badland texture
-    float texture = sin(p.x * 0.002) * cos(p.y * 0.0018) * 15.0;
+    // Towering hoodoos and rock spires
+    float hoodoo_field = abs(sin(p.x * scale3) * cos(p.y * scale3));
+    float hoodoo_height = pow(hoodoo_field, 5.0) * 270.0;
+    float spire_cluster = pow(abs(sin(p.x * scale3 * 1.5 + 100.0) * 
+                               cos(p.y * scale3 * 1.5 - 100.0)), 6.0) * 225.0;
     
-    return hills + erosion + mesa + texture;
+    // Natural arches and bridges
+    float arch_base = abs(sin(p.x * scale4 + p.y * scale4 * 0.6) * 
+                         cos(p.x * scale4 * 0.7 - p.y * scale4));
+    float arch_void = (arch_base > 0.7 && mesa_pattern > 0.5) ? 
+        pow(arch_base, 3.0) * -60.0 : 
+        0.0;
+    
+    // Dramatic layered rock strata
+    float strata_tilt = sin(p.x * 0.0001 + p.y * 0.00015) * 0.3;
+    float strata = sin(p.y * scale4 + p.x * strata_tilt) * 0.5 + 0.5;
+    float layer_height = floor(strata * 12.0) * 10.0;
+    
+    // Scree slopes and talus fields
+    float scree = sin(p.x * scale5) * cos(p.y * scale5 * 1.1) * 20.0 * (1.0 - mesa_pattern);
+    
+    float height = mesa_height + hoodoo_height + spire_cluster + 
+                  layer_height + arch_void - slot_canyon + scree;
+                  
+    return clamp(height, -250.0, 480.0);
 }
 
 float floating_height(vec2 p) {
-    // Low frequency for large floating islands
-    float scale1 = 0.0002;
-    float scale2 = 0.0004;
+    // Large floating island formations at extreme heights
+    float scale1 = 0.0008;
+    float scale2 = 0.0015;
+    float scale3 = 0.003;
+    float scale4 = 0.0002;
     
-    // Smooth floating plateaus
-    float island1 = smoothstep(0.3, 0.7, sin(p.x * scale1) * cos(p.y * scale1) * 0.5 + 0.5) * 60.0;
-    float island2 = smoothstep(0.4, 0.6, cos(p.x * scale2 + 0.8) * sin(p.y * scale2 * 0.9) * 0.5 + 0.5) * 40.0;
+    // Main floating continents
+    float continent1 = pow(abs(sin(p.x * scale4) * cos(p.y * scale4)), 0.5) * 200.0;
+    float continent2 = pow(abs(cos(p.x * scale4 * 1.3 + 100.0) * sin(p.y * scale4 * 0.9 - 50.0)), 0.6) * 150.0;
     
-    // Gentle surface
-    float surface = sin(p.x * 0.001) * cos(p.y * 0.0008) * 10.0;
+    // Individual floating islands
+    float island1 = smoothstep(0.3, 0.8, abs(sin(p.x * scale1) * cos(p.y * scale1))) * 120.0;
+    float island2 = smoothstep(0.4, 0.7, abs(cos(p.x * scale2 + 0.8) * sin(p.y * scale2 * 0.9))) * 90.0;
     
-    return 80.0 + island1 + island2 + surface;
+    // Rocky spires on the islands
+    float spires = pow(abs(sin(p.x * scale3) * cos(p.y * scale3 * 1.2)), 4.0) * 80.0;
+    
+    // Hanging gardens and waterfalls (negative values for overhangs)
+    float overhang = smoothstep(0.7, 0.9, abs(sin(p.x * scale2 * 2.0 + p.y * scale2))) * -40.0;
+    
+    // Crystal formations on underside
+    float crystals = pow(abs(sin(p.x * 0.01) * cos(p.y * 0.01)), 3.0) * 60.0;
+    
+    // Base altitude for floating effect
+    float base_altitude = 250.0;
+    
+    // Combine all features
+    float height = base_altitude + max(continent1, continent2) + 
+                  max(island1, island2) + spires + crystals + overhang;
+    
+    return clamp(height, 150.0, 500.0);
 }
 
 float caverns_height(vec2 p) {
-    // Low frequency for larger cavern systems
-    float scale1 = 0.0004;
-    float scale2 = 0.0008;
+    // Extensive underground cavern networks
+    float scale1 = 0.004;
+    float scale2 = 0.008;
+    float scale3 = 0.02;
+    float scale4 = 0.001;
     
-    // Rolling base terrain
-    float base = sin(p.x * scale1) * cos(p.y * scale1 * 0.8) * 40.0;
+    // Rolling karst terrain base
+    float base = sin(p.x * scale1) * cos(p.y * scale1 * 0.8) * 60.0;
     
-    // Smooth depressions instead of sharp holes
-    float depression1 = smoothstep(0.6, 0.3, sin(p.x * scale2) * cos(p.y * scale2) * 0.5 + 0.5) * -30.0;
-    float depression2 = smoothstep(0.5, 0.2, cos(p.x * scale2 * 1.3 + 1.0) * sin(p.y * scale2 * 0.9) * 0.5 + 0.5) * -20.0;
+    // Major sinkholes and cave entrances
+    float sinkhole1 = smoothstep(0.7, 0.2, abs(sin(p.x * scale2) * cos(p.y * scale2))) * -120.0;
+    float sinkhole2 = smoothstep(0.6, 0.15, abs(cos(p.x * scale2 * 1.3 + 1.0) * sin(p.y * scale2 * 0.9))) * -100.0;
+    float sinkhole3 = smoothstep(0.8, 0.3, abs(sin(p.x * scale4 + p.y * scale4 * 0.5))) * -150.0;
     
-    // Gentle undulations
-    float detail = sin(p.x * 0.002) * cos(p.y * 0.0015) * 10.0;
+    // Collapsed cavern ceilings
+    float collapse_pattern = abs(sin(p.x * scale3) * cos(p.y * scale3 * 1.2));
+    float collapsed = collapse_pattern > 0.6 ? pow(collapse_pattern, 2.0) * -80.0 : 0.0;
     
-    return base + depression1 + depression2 + detail;
+    // Underground rivers and channels
+    float river_channel = pow(abs(sin(p.x * 0.003 + p.y * 0.002)), 3.0) * -40.0;
+    
+    // Stalactite and stalagmite fields (surface roughness)
+    float formations = abs(sin(p.x * 0.05) * cos(p.y * 0.05)) * 30.0;
+    
+    // Natural bridges over caverns
+    float bridge = smoothstep(0.8, 0.95, abs(sin(p.x * scale2 * 0.7 - p.y * scale2 * 0.5))) * 60.0;
+    
+    float height = base + sinkhole1 + sinkhole2 + sinkhole3 + 
+                  collapsed + river_channel + formations + bridge;
+    
+    return clamp(height, -300.0, 150.0);
 }
 
 float swamp_height(vec2 p) {
-    // Low frequency for gentle swamp terrain
-    float scale1 = 0.0005;
-    float scale2 = 0.001;
+    // Murky swamp terrain with varied water features
+    float scale1 = 0.005;
+    float scale2 = 0.01;
+    float scale3 = 0.03;
+    float scale4 = 0.002;
     
-    // Very gentle undulations
-    float undulation = sin(p.x * scale1) * cos(p.y * scale1 * 0.9) * 15.0;
-    float pools = smoothstep(0.4, 0.6, sin(p.x * scale2) * cos(p.y * scale2 * 1.1) * 0.5 + 0.5) * -10.0;
+    // Gentle base undulations
+    float undulation = sin(p.x * scale1) * cos(p.y * scale1 * 0.9) * 25.0;
     
-    // Subtle surface variation
-    float surface = sin(p.x * 0.003) * cos(p.y * 0.0025) * 5.0;
+    // Deep water channels and pools
+    float pools = smoothstep(0.4, 0.7, abs(sin(p.x * scale2) * cos(p.y * scale2 * 1.1))) * -40.0;
+    float channels = pow(abs(sin(p.x * scale4 + p.y * scale4 * 0.7)), 2.0) * -30.0;
     
-    return undulation + pools + surface;
+    // Raised hummocks and dry land
+    float hummocks = pow(abs(sin(p.x * scale2 * 1.5) * cos(p.y * scale2 * 1.3)), 3.0) * 35.0;
+    
+    // Dead trees and root systems (small bumps)
+    float roots = abs(sin(p.x * scale3) * cos(p.y * scale3 * 1.2)) * 15.0;
+    
+    // Bog pits and quicksand
+    float bog_pattern = abs(sin(p.x * 0.008 - p.y * 0.006) * cos(p.x * 0.007 + p.y * 0.009));
+    float bog_pits = bog_pattern > 0.7 ? pow(bog_pattern, 2.0) * -25.0 : 0.0;
+    
+    // Thick vegetation mounds
+    float vegetation = smoothstep(0.3, 0.6, abs(sin(p.x * scale1 * 2.0) * cos(p.y * scale1 * 1.8))) * 20.0;
+    
+    float height = -10.0 + undulation + pools + channels + hummocks + 
+                  roots + bog_pits + vegetation;
+    
+    return clamp(height, -100.0, 80.0);
 }
 
 // Enhanced biome selection with more variety and smaller regions
@@ -299,35 +522,49 @@ float get_biome_height(vec2 p) {
 // Smooth blending between biomes
 float get_blended_biome_height(vec2 p) {
     // Sample multiple nearby points for smoother transitions
-    float sample_dist = 50.0;
+    float sample_dist = 100.0; // Increased for larger features
     float h_center = get_biome_height(p);
     float h_north = get_biome_height(p + vec2(0.0, sample_dist));
     float h_south = get_biome_height(p + vec2(0.0, -sample_dist));
     float h_east = get_biome_height(p + vec2(sample_dist, 0.0));
     float h_west = get_biome_height(p + vec2(-sample_dist, 0.0));
     
-    // Average nearby samples for smoother terrain
-    float primary_height = (h_center * 2.0 + h_north + h_south + h_east + h_west) / 6.0;
+    // Weighted average for smoother transitions
+    float primary_height = (h_center * 3.0 + h_north + h_south + h_east + h_west) / 7.0;
     
-    // Add rolling hills with lower frequency
-    float hills = 0.0;
-    hills += sin(p.x * 0.0001) * cos(p.y * 0.00012) * 60.0;
-    hills += sin(p.x * 0.00018 + 1.5) * cos(p.y * 0.00015 - 0.7) * 40.0;
-    hills += sin(p.x * 0.00025 - 0.3) * cos(p.y * 0.0003 + 1.2) * 25.0;
+    // Enhanced fractal noise with more octaves for detail
+    float fractal_noise = 0.0;
+    float amplitude = 60.0; // Increased base amplitude
+    float frequency = 0.0005;
+    for (int i = 0; i < 7; i++) { // More octaves for finer detail
+        fractal_noise += sin(p.x * frequency) * cos(p.y * frequency) * amplitude;
+        fractal_noise += sin(p.x * frequency * 1.7 + 100.0) * cos(p.y * frequency * 1.7 + 100.0) * amplitude * 0.7;
+        amplitude *= 0.45; // Slower falloff for more influence from each octave
+        frequency *= 2.3;
+    }
     
-    // Add gentle undulations
-    float undulation = 0.0;
-    undulation += sin(p.x * 0.0004) * cos(p.y * 0.0004) * 15.0;
-    undulation += sin(p.x * 0.0008 + 2.1) * sin(p.y * 0.0007 - 1.3) * 10.0;
+    // Larger scale continental features
+    float continent_scale = 0.0001; // Even larger scale
+    float continental = (sin(p.x * continent_scale) * cos(p.y * continent_scale * 0.8) + 
+                        cos(p.x * continent_scale * 0.3) * sin(p.y * continent_scale * 1.2)) * 120.0; // More dramatic
     
-    // Very gentle large scale features
-    float continent_scale = 0.00005;
-    float continental = sin(p.x * continent_scale) * cos(p.y * continent_scale) * 30.0;
+    // Erosion simulation - smooth out steep areas
+    float slope_factor = abs(sin(p.x * 0.005) - sin(p.x * 0.005 + 1.0)) + 
+                        abs(sin(p.y * 0.005) - sin(p.y * 0.005 + 1.0));
+    float erosion = min(slope_factor, 1.0) * 0.3;
     
-    // Smooth everything together
-    float height = primary_height * 0.7 + hills * 0.2 + undulation * 0.1;
+    // Terracing effect - make it much more subtle
+    float terrace_height = 100.0; // Increased from 40 to make terraces less frequent
+    float terraced = primary_height > 0.0 ?
+        floor(primary_height / terrace_height) * terrace_height + 
+        pow(fract(primary_height / terrace_height), 2.0) * terrace_height :
+        primary_height;
     
-    return height + continental;
+    // Mix terraced and smooth terrain - reduce terrace influence significantly
+    float terrace_influence = clamp(sin(p.x * 0.001 + p.y * 0.0008) * 0.5 + 0.5, 0.0, 1.0) * 0.2; // Max 20% terrace influence
+    float height = terraced * terrace_influence + primary_height * (1.0 - terrace_influence);
+    
+    return height + fractal_noise + continental * (1.0 - erosion);
 }
 
 void main() {

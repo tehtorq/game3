@@ -39,88 +39,88 @@ impl Biome {
     pub fn height_params(&self) -> BiomeHeightParams {
         match self {
             Biome::Plains => BiomeHeightParams {
-                base_amplitude: 60.0,
+                base_amplitude: 80.0,  // Increased for more variation
                 frequency_multiplier: 1.0,
                 roughness: 0.3,
-                min_height: -100.0,
-                max_height: 100.0,
+                min_height: -150.0,    // Deeper valleys
+                max_height: 200.0,     // Higher hills
             },
             Biome::Canyon => BiomeHeightParams {
-                base_amplitude: 150.0,
+                base_amplitude: 300.0,  // Much deeper canyons
                 frequency_multiplier: 1.5,
                 roughness: 0.1,
-                min_height: -300.0,
-                max_height: 50.0,
+                min_height: -600.0,     // Very deep canyons
+                max_height: 150.0,      // Higher mesas
             },
             Biome::Plateau => BiomeHeightParams {
-                base_amplitude: 40.0,
+                base_amplitude: 180.0,  // Much higher plateaus
                 frequency_multiplier: 0.5,
                 roughness: 0.1,
-                min_height: 200.0,
-                max_height: 300.0,
+                min_height: 200.0,      // Higher base elevation
+                max_height: 600.0,      // Towering mesas
             },
             Biome::Crystalline => BiomeHeightParams {
-                base_amplitude: 100.0,
+                base_amplitude: 200.0,  // Taller crystal formations
                 frequency_multiplier: 3.0,
                 roughness: 0.9,
-                min_height: -50.0,
-                max_height: 250.0,
+                min_height: -100.0,
+                max_height: 450.0,      // Higher spikes
             },
             Biome::Volcanic => BiomeHeightParams {
-                base_amplitude: 80.0,
+                base_amplitude: 250.0,  // Larger volcanic features
                 frequency_multiplier: 2.0,
                 roughness: 0.7,
-                min_height: -50.0,
-                max_height: 150.0,
+                min_height: -200.0,     // Deeper craters
+                max_height: 700.0,      // Towering volcanoes
             },
             Biome::Mountains => BiomeHeightParams {
-                base_amplitude: 200.0,
+                base_amplitude: 400.0,  // Much taller mountains
                 frequency_multiplier: 0.8,
                 roughness: 0.5,
-                min_height: -100.0,
-                max_height: 400.0,
+                min_height: -250.0,     // Deep valleys
+                max_height: 1000.0,     // Towering peaks
             },
             Biome::Desert => BiomeHeightParams {
-                base_amplitude: 50.0,
+                base_amplitude: 100.0,   // Larger dunes
                 frequency_multiplier: 2.5,
                 roughness: 0.2,
-                min_height: -20.0,
-                max_height: 120.0,
+                min_height: -80.0,
+                max_height: 250.0,      // Higher sand formations
             },
             Biome::Arctic => BiomeHeightParams {
-                base_amplitude: 120.0,
+                base_amplitude: 250.0,  // Massive glaciers
                 frequency_multiplier: 1.8,
                 roughness: 0.8,
-                min_height: 50.0,
-                max_height: 300.0,
+                min_height: 100.0,      // Higher ice sheets
+                max_height: 600.0,      // Towering ice formations
             },
             Biome::Badlands => BiomeHeightParams {
-                base_amplitude: 90.0,
+                base_amplitude: 220.0,  // Dramatic erosion
                 frequency_multiplier: 2.2,
                 roughness: 0.9,
-                min_height: -150.0,
-                max_height: 200.0,
+                min_height: -300.0,     // Deep slot canyons
+                max_height: 500.0,      // Tall hoodoos
             },
             Biome::Floating => BiomeHeightParams {
-                base_amplitude: 60.0,
+                base_amplitude: 120.0,  // Larger floating islands
                 frequency_multiplier: 0.3,
                 roughness: 0.1,
-                min_height: 150.0,
-                max_height: 350.0,
+                min_height: 300.0,      // Higher in the sky
+                max_height: 700.0,      // Very high islands
             },
             Biome::Caverns => BiomeHeightParams {
-                base_amplitude: 100.0,
+                base_amplitude: 180.0,  // Deeper cave systems
                 frequency_multiplier: 3.5,
                 roughness: 1.0,
-                min_height: -200.0,
-                max_height: 100.0,
+                min_height: -400.0,     // Very deep caverns
+                max_height: 200.0,      // Higher cave ceilings
             },
             Biome::Swamp => BiomeHeightParams {
-                base_amplitude: 30.0,
+                base_amplitude: 60.0,   // More varied swampland
                 frequency_multiplier: 4.0,
                 roughness: 0.6,
-                min_height: -50.0,
-                max_height: 20.0,
+                min_height: -100.0,     // Deeper pools
+                max_height: 80.0,       // Higher bog mounds
             },
         }
     }

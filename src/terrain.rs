@@ -1,4 +1,5 @@
 use miniquad::*;
+use glam::Vec2;
 use crate::vertex::Vertex;
 use crate::biome::{BiomeMap, Biome};
 use crate::constants::*;
@@ -439,331 +440,449 @@ impl Terrain {
     }
     
     fn height_at_with_biomes(x: f32, z: f32, biome_weights: &[(Biome, f32)]) -> f32 {
-        let mut total_height = 0.0;
-        
-        // Calculate base height from biomes
-        for (biome, weight) in biome_weights {
-            let params = biome.height_params();
-            let height = Self::biome_height(x, z, biome, &params);
-            total_height += height * weight;
-        }
-        
-        // Add fractal noise for natural terrain variation
-        let mut fractal_noise = 0.0;
-        let mut amplitude = 40.0;
-        let mut frequency = 0.0005;
-        for i in 0..5 {
-            fractal_noise += (x * frequency).sin() * (z * frequency).cos() * amplitude;
-            fractal_noise += (x * frequency * 1.7 + 100.0).sin() * (z * frequency * 1.7 + 100.0).cos() * amplitude * 0.7;
-            amplitude *= 0.5;
-            frequency *= 2.2;
-        }
-        
-        // Add large-scale terrain features
-        let continent_scale = 0.0002;
-        let continental = ((x * continent_scale).sin() * (z * continent_scale * 0.8).cos() + 
-                          (x * continent_scale * 0.3).cos() * (z * continent_scale * 1.2).sin()) * 80.0;
-        
-        // Erosion simulation - smooth out steep areas
-        let slope_factor = ((x * 0.005).sin() - (x * 0.005 + 1.0).sin()).abs() + 
-                          ((z * 0.005).sin() - (z * 0.005 + 1.0).sin()).abs();
-        let erosion = slope_factor.min(1.0) * 0.3;
-        
-        // Terracing effect - make it much more subtle
-        let terrace_height = 100.0; // Increased from 40 to make terraces less frequent
-        let terraced = if total_height > 0.0 {
-            let terrace_level = (total_height / terrace_height).floor();
-            let terrace_blend = (total_height / terrace_height).fract();
-            // Smooth the terrace transitions
-            let smooth_blend = terrace_blend * terrace_blend * (3.0 - 2.0 * terrace_blend);
-            terrace_level * terrace_height + smooth_blend * terrace_height
-        } else {
-            total_height
-        };
-        
-        // Mix terraced and smooth terrain - reduce terrace influence significantly
-        let terrace_influence = ((x * 0.001 + z * 0.0008).sin() * 0.5 + 0.5).clamp(0.0, 1.0) * 0.2; // Max 20% terrace influence
-        let height = terraced * terrace_influence + total_height * (1.0 - terrace_influence);
-        
-        height + fractal_noise + continental * (1.0 - erosion)
+        // Use the shader-matched implementation for perfect CPU/GPU parity
+        Self::get_blended_biome_height(Vec2::new(x, z))
     }
     
     fn biome_height(x: f32, z: f32, biome: &Biome, params: &crate::biome::BiomeHeightParams) -> f32 {
         match biome {
             Biome::Plains => {
-                // Original terrain generation for plains
-                let scale1 = 0.002 * params.frequency_multiplier;
-                let scale2 = 0.007 * params.frequency_multiplier;
-                let scale3 = 0.015 * params.frequency_multiplier;
+                // Rolling plains with more variation
+                let scale1 = 0.002;
+                let scale2 = 0.007;
+                let scale3 = 0.015;
                 
-                let h1 = (x * scale1).sin() * (z * scale1).cos() * params.base_amplitude;
-                let h2 = (x * scale2 + 100.0).sin() * (z * scale2 + 100.0).sin() * params.base_amplitude * 0.5;
-                let h3 = (x * scale3 + 200.0).cos() * (z * scale3 + 200.0).cos() * params.base_amplitude * 0.25;
+                // Larger rolling hills
+                let h1 = (x * scale1).sin() * (z * scale1).cos() * 40.0;
+                let h2 = (x * scale2 + 100.0).sin() * (z * scale2 + 100.0).sin() * 20.0;
+                let h3 = (x * scale3 + 200.0).cos() * (z * scale3 + 200.0).cos() * 10.0;
                 
-                h1 + h2 + h3
+                // Add some occasional low ridges
+                let ridge = ((x * 0.0005 + z * 0.0003).sin()).abs().powf(3.0) * 30.0;
+                
+                // Gentle valleys and depressions
+                let depression = smoothstep(0.6, 0.3, ((x * 0.0008).sin() * (z * 0.0006).cos()).abs()) * -20.0;
+                
+                h1 + h2 + h3 + ridge + depression
             },
             Biome::Canyon => {
-                // Complex canyon system with varied depths and slopes
-                let scale1 = 0.003 * params.frequency_multiplier;
-                let scale2 = 0.002 * params.frequency_multiplier;
-                let scale3 = 0.005 * params.frequency_multiplier;
-                let scale4 = 0.0008 * params.frequency_multiplier;
+                // River-like canyon systems with dramatic depth variations
+                let scale1 = 0.0015; // Main river course
+                let scale2 = 0.003;  // Tributaries
+                let scale3 = 0.006;  // Rapids and falls
+                let scale4 = 0.0005; // Canyon width variation
                 
-                // Main canyon with varying width
-                let width_var = 0.4 + ((x * 0.0005 + z * 0.0003).sin() * 0.3);
-                let canyon_main = ((x * scale1).sin() + (z * scale1 * 0.7).cos()) * width_var;
+                // Main river channel - continuous flowing pattern
+                let river_flow = (x * scale1).sin() * 0.7 + (z * scale1 * 0.8).cos() * 0.5;
+                let river_meander = ((x * scale1 * 0.5 + z * scale1 * 0.3).sin() + 
+                                    (x * scale1 * 0.3 - z * scale1 * 0.4).cos()) * 0.4;
                 
-                // Tributary canyons
-                let canyon_branch = ((x * scale2 * 1.3 - z * scale2 * 0.4).sin() + 
-                                   (x * scale2 * 0.5 + z * scale2 * 1.1).cos()) * 0.3;
+                // Tributary channels joining the main river
+                let tributary1 = ((x * scale2 - z * scale2 * 0.6).sin() + 
+                                 (x * scale2 * 0.4 + z * scale2).cos()) * 0.3;
+                let tributary2 = ((x * scale2 * 1.2 + z * scale2 * 0.5).sin() * 
+                                 (x * scale2 * 0.8 - z * scale2 * 0.7).cos()) * 0.25;
                 
-                // Slot canyons (narrow deep cuts)
-                let slot = ((x * scale3 + z * scale3 * 0.5).sin() * 
-                           (x * scale3 * 0.7 - z * scale3).cos()).abs().powf(5.0) * 0.5;
+                // River confluence points - deeper where rivers meet
+                let confluence = ((tributary1 * river_flow).abs() + (tributary2 * river_flow).abs()) * 0.5;
                 
-                let combined = canyon_main + canyon_branch - slot;
+                // Canyon width varies like a real river
+                let width_pattern = (x * scale4 + z * scale4 * 0.7).sin();
+                let canyon_width = 0.3 + width_pattern.abs() * 0.7 + confluence * 0.3;
                 
-                // Variable slope instead of vertical walls
-                let slope_var = 1.2 + ((x * 0.001 + z * 0.0007).sin() * 0.8);
-                let depth = combined.abs().powf(slope_var);
+                // River depth with pools and rapids
+                let pool_pattern = ((x * scale3).sin() * (z * scale3 * 1.2).cos()).abs();
+                let rapids = ((x * scale3 * 2.0 + z * scale3 * 1.5).sin()).abs().powf(3.0) * 0.3;
                 
-                // Stepped canyon walls
-                let steps = ((depth * 8.0).floor() / 8.0).max(0.0);
-                let smooth_depth = depth * 0.3 + steps * 0.7;
+                // Combine all river features
+                let river_depth = (river_flow + river_meander).abs() * canyon_width + 
+                                 tributary1.abs() * 0.5 + tributary2.abs() * 0.5 + 
+                                 confluence + pool_pattern * 0.4 - rapids;
                 
-                // Mesa tops with erosion
-                let mesa_top = ((x * scale4).sin().powi(2) + (z * scale4).cos().powi(2)).sqrt();
-                let erosion = (x * 0.01).sin() * (z * 0.01).cos() * 15.0 * (1.0 - smooth_depth);
+                // Create dramatic canyon walls with overhangs
+                let wall_slope = 1.5 + width_pattern * 0.5;
+                let canyon_cut = river_depth.abs().powf(wall_slope) * 2.0; // Deeper canyons
                 
-                params.min_height + (1.0 - smooth_depth) * (params.max_height - params.min_height) + 
-                mesa_top * 20.0 + erosion
+                // Terraced canyon walls
+                let terraces = ((canyon_cut * 6.0).floor() / 6.0).max(0.0);
+                let final_depth = canyon_cut * 0.4 + terraces * 0.6;
+                
+                // High mesas between canyons
+                let mesa_height = ((x * scale4 * 0.5).sin().powi(2) + (z * scale4 * 0.5).cos().powi(2)) * 40.0;
+                let plateau_base = 200.0; // Base height for dramatic effect
+                
+                // Create dramatic height difference
+                plateau_base + mesa_height - final_depth * 160.0
             },
             Biome::Plateau => {
-                // Layered plateau system with varied elevations
-                let scale1 = 0.001 * params.frequency_multiplier;
-                let scale2 = 0.0008 * params.frequency_multiplier;
-                let scale3 = 0.003 * params.frequency_multiplier;
-                let scale4 = 0.0004 * params.frequency_multiplier;
+                // Dramatic mesa and plateau formations with sheer cliffs
+                let scale1 = 0.0008;
+                let scale2 = 0.0005;
+                let scale3 = 0.002;
+                let scale4 = 0.0003;
                 
-                // Base plateau shape with multiple tiers
-                let tier1 = ((x * scale1).sin() * (z * scale1).cos()).clamp(-1.0, 1.0);
-                let tier2 = ((x * scale2 + 50.0).sin() * (z * scale2 - 30.0).cos()).clamp(-1.0, 1.0);
-                let tier3 = ((x * scale4 - 100.0).cos() * (z * scale4 + 70.0).sin()).clamp(-1.0, 1.0);
+                // Create distinct mesa formations
+                let mesa1 = ((x * scale1).sin() * (z * scale1 * 0.9).cos()).abs();
+                let mesa2 = ((x * scale2 + 200.0).sin() * (z * scale2 - 150.0).cos()).abs();
+                let mesa3 = ((x * scale4 * 1.3).cos() * (z * scale4 + 100.0).sin()).abs();
                 
-                // Create distinct elevation levels
-                let level1 = if tier1.abs() > 0.3 { 1.0 } else { tier1.abs() / 0.3 };
-                let level2 = if tier2.abs() > 0.5 { 1.0 } else { tier2.abs() / 0.5 };
-                let level3 = if tier3.abs() > 0.7 { 1.0 } else { tier3.abs() / 0.7 };
+                // Sharp cliff edges
+                let cliff_sharpness = 8.0; // Very sharp transitions
+                let mesa_top1 = if mesa1 > 0.4 { 1.0 } else { (mesa1 / 0.4).powf(cliff_sharpness) };
+                let mesa_top2 = if mesa2 > 0.5 { 1.0 } else { (mesa2 / 0.5).powf(cliff_sharpness) };
+                let mesa_top3 = if mesa3 > 0.6 { 1.0 } else { (mesa3 / 0.6).powf(cliff_sharpness) };
                 
-                // Smooth transitions between levels
-                let smooth1 = level1 * level1 * (3.0 - 2.0 * level1);
-                let smooth2 = level2 * level2 * (3.0 - 2.0 * level2);
-                let smooth3 = level3 * level3 * (3.0 - 2.0 * level3);
+                // Dramatic height differences between plateau levels
+                let base_elevation = -50.0;
+                let tier1_height = 120.0;
+                let tier2_height = 180.0;
+                let tier3_height = 250.0;
                 
-                // Stack the plateaus
-                let base_height = params.min_height;
-                let tier_height = (params.max_height - params.min_height) / 3.0;
+                // Calculate mesa heights
+                let h1 = base_elevation + mesa_top1 * tier1_height;
+                let h2 = base_elevation + mesa_top2 * tier2_height;
+                let h3 = base_elevation + mesa_top3 * tier3_height;
                 
-                let h1 = base_height + smooth1 * tier_height;
-                let h2 = h1 + smooth2 * tier_height * 0.8;
-                let h3 = h2 + smooth3 * tier_height * 0.6;
+                // Natural bridges and arches
+                let arch_pattern = ((x * scale3 + z * scale3 * 0.7).sin() * 
+                                   (x * scale3 * 1.2 - z * scale3 * 0.5).cos()).abs();
+                let arch_cut = if arch_pattern > 0.7 { arch_pattern.powf(4.0) * -50.0 } else { 0.0 };
                 
-                // Surface weathering and details
-                let weathering = (x * scale3).sin() * (z * scale3).cos() * 8.0;
-                let cracks = ((x * 0.02).sin() * (z * 0.02).cos()).abs().powf(3.0) * -5.0;
+                // Rock spires and hoodoos
+                let spire_pattern = ((x * scale3 * 2.0).sin() * (z * scale3 * 2.0).cos()).abs();
+                let spires = spire_pattern.powf(6.0) * 40.0;
                 
-                // Blend the tiers based on position
-                let blend = ((x * 0.0002 + z * 0.0003).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-                let height = h1 * (1.0 - blend) + h3 * blend + h2 * 0.3;
+                // Weathering and erosion patterns
+                let erosion = ((x * 0.01).sin() + (z * 0.01).cos()) * 10.0 * (1.0 - mesa_top1.max(mesa_top2).max(mesa_top3));
                 
-                height + weathering + cracks
+                // Combine all plateau features
+                let height = h1.max(h2).max(h3) + spires + arch_cut + erosion;
+                
+                // Add dramatic vertical relief
+                height.clamp(-100.0, 350.0)
             },
             Biome::Crystalline => {
                 // Varied spiky crystal formations
-                let scale1 = 0.01 * params.frequency_multiplier;
-                let scale2 = 0.02 * params.frequency_multiplier;
-                let scale3 = 0.05 * params.frequency_multiplier;
-                let scale4 = 0.007 * params.frequency_multiplier;
+                let scale1 = 0.01;
+                let scale2 = 0.02;
+                let scale3 = 0.05;
+                let scale4 = 0.007;
                 
                 // Vary spike sharpness based on position
                 let sharpness1 = 0.8 + ((x * 0.001).sin() * (z * 0.001).cos() * 0.4);
                 let sharpness2 = 1.2 + ((x * 0.002 + 100.0).sin() * (z * 0.002).cos() * 0.6);
                 
                 // Different crystal cluster patterns
-                let spike1 = ((x * scale1).sin() * (z * scale1).cos()).abs().powf(sharpness1) * params.base_amplitude;
-                let spike2 = ((x * scale2 + 50.0).cos() * (z * scale2 - 30.0).sin()).abs().powf(sharpness2) * params.base_amplitude * 0.7;
-                let spike3 = ((x * scale3 - 20.0).sin() * (z * scale3 + 40.0).cos()).abs() * params.base_amplitude * 0.4;
+                let spike1 = ((x * scale1).sin() * (z * scale1).cos()).abs().powf(sharpness1) * 150.0;
+                let spike2 = ((x * scale2 + 50.0).cos() * (z * scale2 - 30.0).sin()).abs().powf(sharpness2) * 105.0;
+                let spike3 = ((x * scale3 - 20.0).sin() * (z * scale3 + 40.0).cos()).abs() * 60.0;
                 
                 // Add larger crystal formations
                 let large_crystal = ((x * scale4).sin().powi(2) + (z * scale4).cos().powi(2)).sqrt();
-                let crystal_height = (1.0 - large_crystal).max(0.0).powf(1.5) * params.base_amplitude * 0.8;
+                let crystal_height = (1.0 - large_crystal).max(0.0).powf(1.5) * 120.0;
                 
                 // Base elevation variation
                 let base_variation = (x * 0.003).sin() * (z * 0.003).cos() * 15.0;
                 
                 let height = spike1 + spike2 + spike3 + crystal_height + base_variation;
-                height.clamp(params.min_height, params.max_height)
+                height.clamp(-100.0, 400.0)
             },
             Biome::Volcanic => {
                 // Rough terrain with crater-like formations
-                let scale1 = 0.004 * params.frequency_multiplier;
-                let scale2 = 0.008 * params.frequency_multiplier;
+                let scale1 = 0.004;
+                let scale2 = 0.008;
+                let scale3 = 0.002;
+                let scale4 = 0.001;
                 
-                let crater = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
-                let rough = (x * scale2).sin() * (z * scale2).cos() * params.base_amplitude * params.roughness;
+                // Multiple volcanic craters with varying sizes
+                let crater1 = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
+                let crater2 = ((x * scale3 + 100.0).sin().powi(2) + (z * scale3 - 50.0).cos().powi(2)).sqrt();
+                let crater3 = ((x * scale4 * 1.5).sin().powi(2) + (z * scale4 * 1.2).cos().powi(2)).sqrt();
                 
-                let base_height = (1.0 - crater) * params.base_amplitude + rough;
-                base_height.clamp(params.min_height, params.max_height)
+                // Dramatic volcanic cones
+                let h1 = (1.0 - crater1) * 180.0;
+                let h2 = (1.0 - crater2) * 120.0;
+                let h3 = (1.0 - crater3) * 250.0; // Main massive volcano
+                
+                // Rough lava flows and volcanic debris
+                let rough = (x * scale2).sin() * (z * scale2).cos() * 80.0;
+                let lava_flow = ((x * 0.003 + z * 0.002).sin()).abs() * 40.0;
+                
+                // Caldera formations
+                let caldera = if crater1 < 0.3 { -60.0 } else { 0.0 };
+                let caldera2 = if crater3 < 0.4 { -80.0 } else { 0.0 };
+                
+                // Volcanic ridges and fissures
+                let ridge = ((x * 0.005 - z * 0.003).sin()).abs().powf(2.0) * 60.0;
+                
+                let base_height = h1.max(h2).max(h3) + rough + lava_flow + ridge + caldera + caldera2;
+                base_height.clamp(-150.0, 350.0)
             },
             Biome::Mountains => {
-                // Realistic mountain ranges with varied slopes and heights
-                let scale1 = 0.001 * params.frequency_multiplier;
-                let scale2 = 0.003 * params.frequency_multiplier;
-                let scale3 = 0.0005 * params.frequency_multiplier;
-                let scale4 = 0.008 * params.frequency_multiplier;
-                let scale5 = 0.0002 * params.frequency_multiplier;
+                // Dramatic mountain ranges with connected peaks and ridgelines
+                let scale1 = 0.0008;  // Major range direction
+                let scale2 = 0.0015;  // Individual peaks
+                let scale3 = 0.0003;  // Range backbone
+                let scale4 = 0.004;   // Rocky details
+                let scale5 = 0.0001;  // Continental scale
                 
-                // Continental divide - major ridge
-                let divide = ((x * scale5).sin() - (z * scale5 * 0.6).cos()).abs();
-                let divide_height = divide.powf(0.5) * params.base_amplitude * 1.2;
+                // Major mountain range ridgeline - continuous spine
+                let range_angle: f32 = 0.4; // Northwest to southeast trend
+                let ridge_main = ((x * scale3 * range_angle.cos() + z * scale3 * range_angle.sin()).sin() * 0.5 + 0.5).powf(3.0);
+                let ridge_secondary = ((x * scale3 * 1.2 - z * scale3 * 0.7).cos() * 0.5 + 0.5).powf(2.5);
                 
-                // Multiple mountain peaks at different elevations
-                let peak1 = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
-                let peak2 = ((x * scale2 + 100.0).sin().powi(2) + (z * scale2 - 50.0).cos().powi(2)).sqrt();
-                let peak3 = ((x * scale3 - 200.0).sin().powi(2) + (z * scale3 + 150.0).cos().powi(2)).sqrt();
+                // Connected peak system along the ridges
+                let peak_spacing = 0.0012;
+                let peak_line1 = ((x * peak_spacing * range_angle.cos() + z * peak_spacing * range_angle.sin()).sin().powi(2) + 
+                                 (x * peak_spacing * range_angle.sin() - z * peak_spacing * range_angle.cos()).cos().powi(2)).sqrt();
+                let peak_line2 = ((x * peak_spacing * 1.3 + 100.0).sin().powi(2) + 
+                                 (z * peak_spacing * 1.3 - 50.0).cos().powi(2)).sqrt();
                 
-                // Vary peak heights and shapes
-                let h1 = (1.0 - peak1).max(0.0).powf(1.5) * params.base_amplitude * 0.8;
-                let h2 = (1.0 - peak2).max(0.0).powf(2.0) * params.base_amplitude * 0.6;
-                let h3 = (1.0 - peak3).max(0.0).powf(1.2) * params.base_amplitude * 0.7;
+                // Create dramatic pointed peaks
+                let peak_sharpness = 2.5; // Higher = sharper peaks
+                let h1 = (1.0 - peak_line1).max(0.0).powf(peak_sharpness) * 270.0;
+                let h2 = (1.0 - peak_line2).max(0.0).powf(peak_sharpness * 0.8) * 225.0;
                 
-                // Saddles and valleys between peaks
-                let valley1 = ((x * scale2 * 0.7 + z * scale2 * 0.5).sin() * 0.5 + 0.5).powf(2.0) * -40.0;
-                let valley2 = ((x * scale1 * 1.3 - z * scale1 * 0.8).cos() * 0.5 + 0.5).powf(2.0) * -30.0;
+                // Ridge height variations - peaks are higher along the ridge
+                let ridge_height = ridge_main * 180.0 + ridge_secondary * 120.0;
                 
-                // Foothills with gradual slope
-                let distance_from_peak = ((x * 0.001).sin().powi(2) + (z * 0.001).cos().powi(2)).sqrt();
-                let foothill_factor = (1.0 - distance_from_peak).max(0.0);
-                let foothills = foothill_factor * (x * scale4).sin() * (z * scale4).cos() * 30.0;
+                // Deep valleys between ridges
+                let valley_pattern = (x * scale2 + z * scale2 * 0.6).sin() + 
+                                    (x * scale2 * 0.8 - z * scale2 * 0.5).cos();
+                let valley_depth = valley_pattern.abs().powf(2.0) * -60.0;
                 
-                // Glacial carving
-                let glacial = ((x * 0.005).sin() * (z * 0.005).cos()).abs().powf(0.3) * -20.0;
+                // Dramatic cliffs and rock faces
+                let cliff_pattern = ((x * scale4).sin() * (z * scale4 * 1.2).cos()).abs();
+                let cliffs = cliff_pattern.powf(4.0) * 80.0;
                 
-                let height = divide_height + h1 + h2 + h3 + valley1 + valley2 + foothills + glacial;
-                height.clamp(params.min_height, params.max_height)
+                // Snow fields and glacial valleys
+                let glacial_valley = ((x * scale2 * 0.5 + z * scale2 * 0.7).sin()).abs().powf(0.5) * -40.0;
+                let snow_cap = (h1 + h2 + ridge_height).max(225.0) * 0.2;
+                
+                // Foothills that gradually rise to meet the mountains
+                let distance_to_ridge = ((ridge_main - 0.5).abs() + (ridge_secondary - 0.5).abs()).min(1.0);
+                let foothill_height = (1.0 - distance_to_ridge).powf(0.5) * 60.0;
+                
+                // Continental mountain building
+                let tectonic = ((x * scale5).sin() + (z * scale5 * 0.8).cos()) * 45.0;
+                
+                let height = ridge_height + h1 + h2 + valley_depth + cliffs + 
+                            glacial_valley + snow_cap + foothill_height + tectonic;
+                            
+                // Ensure dramatic height variations
+                height.clamp(-250.0, 450.0)
             },
             Biome::Desert => {
-                // Sand dune formations
-                let scale1 = 0.005 * params.frequency_multiplier;
-                let scale2 = 0.01 * params.frequency_multiplier;
-                let scale3 = 0.03 * params.frequency_multiplier;
+                // Sand dune formations with dramatic heights
+                let scale1 = 0.005;
+                let scale2 = 0.01;
+                let scale3 = 0.03;
                 
-                // Large dunes
-                let dunes = ((x * scale1).sin() * (z * scale1 * 1.2).cos()).abs() * params.base_amplitude;
-                // Ripples
-                let ripples = (x * scale3).sin() * (z * scale3).cos() * params.base_amplitude * 0.1;
-                // Medium variation
-                let medium = ((x * scale2 + 30.0).cos() * (z * scale2 - 20.0).sin()) * params.base_amplitude * 0.3;
+                // Large dramatic dunes
+                let dunes = ((x * scale1).sin() * (z * scale1 * 1.2).cos()).abs() * 80.0;
                 
-                let height = params.min_height + dunes + ripples + medium;
-                height.clamp(params.min_height, params.max_height)
+                // Secondary dune fields
+                let secondary = (x * scale2 + 30.0).cos() * (z * scale2 - 20.0).sin() * 30.0;
+                
+                // Sand ripples and waves
+                let ripples = (x * scale3).sin() * (z * scale3).cos() * 10.0;
+                
+                // Occasional rock outcroppings
+                let rocks = ((x * 0.002).sin() * (z * 0.002).cos()).abs().powf(4.0) * 60.0;
+                
+                // Wind-carved hollows
+                let hollows = smoothstep(0.7, 0.5, ((x * 0.004 + z * 0.003).sin()).abs()) * -30.0;
+                
+                let height = -20.0 + dunes + secondary + ripples + rocks + hollows;
+                height.clamp(-100.0, 200.0)
             },
             Biome::Arctic => {
-                // Varied icy formations
-                let scale1 = 0.008 * params.frequency_multiplier;
-                let scale2 = 0.02 * params.frequency_multiplier;
-                let scale3 = 0.04 * params.frequency_multiplier;
-                let scale4 = 0.003 * params.frequency_multiplier;
+                // Dramatic glacial formations with towering ice
+                let scale1 = 0.005;
+                let scale2 = 0.015;
+                let scale3 = 0.03;
+                let scale4 = 0.002;
+                let scale5 = 0.0008;
                 
-                // Glacial base with undulations
-                let glacial = ((x * scale1).sin() + (z * scale1 * 0.9).cos()) * params.base_amplitude * 0.5;
+                // Massive glacial sheets with dramatic elevation
+                let glacier_flow = ((x * scale5).sin() + (z * scale5 * 0.7).cos()) * 120.0;
+                let glacier_thickness = ((x * scale5 * 0.5).sin().powi(2) + (z * scale5 * 0.5).cos().powi(2)) * 90.0;
                 
-                // Ice spikes with varying heights and sharpness
-                let spike_var = 1.5 + ((x * 0.002).sin() * (z * 0.002).cos() * 1.0);
-                let spikes = ((x * scale2).sin() * (z * scale2).cos()).abs().powf(spike_var) * params.base_amplitude * 0.8;
+                // Towering ice spires and seracs
+                let serac_sharpness = 3.0 + ((x * 0.001).sin() * (z * 0.001).cos() * 2.0);
+                let seracs = ((x * scale2).sin() * (z * scale2).cos()).abs().powf(serac_sharpness) * 225.0;
                 
-                // Smaller ice formations
-                let small_spikes = ((x * scale3).sin() * (z * scale3).cos()).abs() * params.base_amplitude * 0.3;
+                // Massive icebergs and pressure ridges
+                let pressure_ridge1 = ((x * scale1 + z * scale1 * 0.5).sin()).abs().powf(2.0) * 180.0;
+                let pressure_ridge2 = ((x * scale1 * 0.8 - z * scale1 * 0.6).cos()).abs().powf(2.0) * 135.0;
                 
-                // Ice sheets and smooth areas
-                let ice_sheets = ((x * scale4).sin().powi(2) + (z * scale4).cos().powi(2)).powf(0.3) * params.base_amplitude * 0.4;
+                // Deep crevasses and moulins
+                let crevasse_pattern = (x * scale3).sin() + (z * scale3 * 1.2).cos();
+                let crevasse_depth = crevasse_pattern.abs().powf(4.0) * 120.0;
+                let moulin = ((x * scale2 * 2.0 + z * scale2 * 1.5).sin() * 
+                             (x * scale2 * 1.5 - z * scale2 * 2.0).cos()).abs().powf(6.0) * -60.0;
                 
-                // Crevasses with varying depths
-                let crevasse_depth = ((x * 0.001 + z * 0.0007).sin() * 0.5 + 0.5) * 0.4;
-                let crevasses = ((x * scale3 + z * scale3 * 0.7).sin()).abs() * params.base_amplitude * crevasse_depth;
+                // Ice caverns and tunnels
+                let cave_pattern = ((x * scale4).sin() * (z * scale4 * 0.8).cos()).abs();
+                let ice_caves = if cave_pattern > 0.6 { cave_pattern.powf(3.0) * -40.0 } else { 0.0 };
                 
-                let height = params.min_height + glacial + spikes + small_spikes + ice_sheets - crevasses;
-                height.clamp(params.min_height, params.max_height)
+                // Frozen waterfalls and ice walls
+                let ice_wall = ((x * scale1 * 0.3 + z * scale1 * 0.9).sin()).abs().powf(5.0) * 105.0;
+                
+                let height = -20.0 + glacier_flow + glacier_thickness + 
+                            seracs + pressure_ridge1 + pressure_ridge2 + ice_wall - 
+                            crevasse_depth + moulin + ice_caves;
+                            
+                height.clamp(-150.0, 420.0)
             },
             Biome::Badlands => {
-                // Complex eroded terrain with varied formations
-                let scale1 = 0.006 * params.frequency_multiplier;
-                let scale2 = 0.015 * params.frequency_multiplier;
-                let scale3 = 0.04 * params.frequency_multiplier;
-                let scale4 = 0.002 * params.frequency_multiplier;
+                // Dramatic eroded landscape with towering formations
+                let scale1 = 0.004;
+                let scale2 = 0.01;
+                let scale3 = 0.025;
+                let scale4 = 0.0015;
+                let scale5 = 0.0006;
                 
-                // Mesa tops with varying heights
-                let mesa_height_var = 0.2 + ((x * 0.001).sin() * (z * 0.0008).cos() * 0.3).abs();
-                let mesas = ((x * scale1).sin() * (z * scale1).cos()).abs().powf(mesa_height_var) * params.base_amplitude;
+                // Massive mesa formations with sheer cliffs
+                let mesa_pattern = ((x * scale1).sin() * (z * scale1 * 0.8).cos()).abs();
+                let mesa_height = if mesa_pattern > 0.3 { 
+                    mesa_pattern.powf(0.2) * 300.0 
+                } else { 
+                    mesa_pattern * 75.0 
+                };
                 
-                // Complex erosion patterns
-                let erosion1 = ((x * scale2 + z * scale2 * 0.5).sin() + (x * scale2 * 0.7 - z * scale2).cos()) * params.base_amplitude * 0.4;
-                let erosion2 = ((x * scale2 * 1.3).sin() - (z * scale2 * 0.8).cos()) * params.base_amplitude * 0.2;
+                // Deep erosion channels and slot canyons
+                let erosion_main = (x * scale2).sin() + (z * scale2 * 1.2).cos();
+                let erosion_branch = (x * scale2 * 1.5 - z * scale2 * 0.7).sin() * 
+                                    (x * scale2 * 0.8 + z * scale2 * 1.3).cos();
+                let slot_canyon = erosion_main.abs().powf(3.0) * 80.0 + 
+                                 erosion_branch.abs().powf(4.0) * 60.0;
                 
-                // Hoodoos and pillars with varying heights
-                let pillar_power = 2.5 + ((x * 0.003 + z * 0.002).sin() * 1.0);
-                let pillars = ((x * scale3).sin() * (z * scale3).cos()).abs().powf(pillar_power) * params.base_amplitude * 0.5;
+                // Towering hoodoos and rock spires
+                let hoodoo_field = ((x * scale3).sin() * (z * scale3).cos()).abs();
+                let hoodoo_height = hoodoo_field.powf(5.0) * 270.0;
+                let spire_cluster = ((x * scale3 * 1.5 + 100.0).sin() * 
+                                    (z * scale3 * 1.5 - 100.0).cos()).abs().powf(6.0) * 225.0;
                 
-                // Layered sediment effect
-                let layers = ((z * scale4).sin() * 0.5 + 0.5) * 8.0;
+                // Natural arches and bridges
+                let arch_base = ((x * scale4 + z * scale4 * 0.6).sin() * 
+                                (x * scale4 * 0.7 - z * scale4).cos()).abs();
+                let arch_void = if arch_base > 0.7 && mesa_pattern > 0.5 { 
+                    arch_base.powf(3.0) * -60.0 
+                } else { 
+                    0.0 
+                };
                 
-                let height = mesas + erosion1.abs() + erosion2.abs() + pillars + layers;
-                height.clamp(params.min_height, params.max_height)
+                // Dramatic layered rock strata
+                let strata_tilt = (x * 0.0001 + z * 0.00015).sin() * 0.3;
+                let strata = (z * scale4 + x * strata_tilt).sin() * 0.5 + 0.5;
+                let layer_height = (strata * 12.0).floor() * 10.0;
+                
+                // Scree slopes and talus fields
+                let scree = (x * scale5).sin() * (z * scale5 * 1.1).cos() * 20.0 * (1.0 - mesa_pattern);
+                
+                let height = mesa_height + hoodoo_height + spire_cluster + 
+                            layer_height + arch_void - slot_canyon + scree;
+                            
+                height.clamp(-250.0, 480.0)
             },
             Biome::Floating => {
-                // Suspended islands
-                let scale1 = 0.002 * params.frequency_multiplier;
-                let scale2 = 0.008 * params.frequency_multiplier;
+                // Large floating island formations at extreme heights
+                let scale1 = 0.0008;
+                let scale2 = 0.0015;
+                let scale3 = 0.003;
+                let scale4 = 0.0002;
                 
-                // Island shapes
-                let islands = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
-                let shape = (1.0 - islands).max(0.0).powf(2.0) * params.base_amplitude;
-                // Small variations
-                let detail = (x * scale2).sin() * (z * scale2).cos() * params.base_amplitude * 0.1;
+                // Main floating continents
+                let continent1 = ((x * scale4).sin() * (z * scale4).cos()).abs().powf(0.5) * 200.0;
+                let continent2 = ((x * scale4 * 1.3 + 100.0).cos() * (z * scale4 * 0.9 - 50.0).sin()).abs().powf(0.6) * 150.0;
                 
-                let height = params.min_height + shape + detail;
-                height.clamp(params.min_height, params.max_height)
+                // Individual floating islands
+                let island1 = smoothstep(0.3, 0.8, ((x * scale1).sin() * (z * scale1).cos()).abs()) * 120.0;
+                let island2 = smoothstep(0.4, 0.7, ((x * scale2 + 0.8).cos() * (z * scale2 * 0.9).sin()).abs()) * 90.0;
+                
+                // Rocky spires on the islands
+                let spires = ((x * scale3).sin() * (z * scale3 * 1.2).cos()).abs().powf(4.0) * 80.0;
+                
+                // Hanging gardens and waterfalls (negative values for overhangs)
+                let overhang = smoothstep(0.7, 0.9, ((x * scale2 * 2.0 + z * scale2).sin()).abs()) * -40.0;
+                
+                // Crystal formations on underside
+                let crystals = ((x * 0.01).sin() * (z * 0.01).cos()).abs().powf(3.0) * 60.0;
+                
+                // Base altitude for floating effect
+                let base_altitude = 250.0;
+                
+                // Combine all features
+                let height = base_altitude + continent1.max(continent2) + 
+                            island1.max(island2) + spires + crystals + overhang;
+                
+                height.clamp(150.0, 500.0)
             },
             Biome::Caverns => {
-                // Pockmarked terrain with holes
-                let scale1 = 0.01 * params.frequency_multiplier;
-                let scale2 = 0.025 * params.frequency_multiplier;
-                let scale3 = 0.05 * params.frequency_multiplier;
+                // Extensive underground cavern networks
+                let scale1 = 0.004;
+                let scale2 = 0.008;
+                let scale3 = 0.02;
+                let scale4 = 0.001;
                 
-                // Base rocky terrain
-                let base = (x * scale1).sin() * (z * scale1).cos() * params.base_amplitude * 0.5;
-                // Cave holes (inverted peaks)
-                let holes1 = ((x * scale2).sin() * (z * scale2).cos()).abs().powf(4.0) * params.base_amplitude;
-                let holes2 = ((x * scale3 + 50.0).cos() * (z * scale3 - 30.0).sin()).abs().powf(4.0) * params.base_amplitude * 0.7;
+                // Rolling karst terrain base
+                let base = (x * scale1).sin() * (z * scale1 * 0.8).cos() * 60.0;
                 
-                let height = base - holes1 - holes2;
-                height.clamp(params.min_height, params.max_height)
+                // Major sinkholes and cave entrances
+                let sinkhole1 = smoothstep(0.7, 0.2, ((x * scale2).sin() * (z * scale2).cos()).abs()) * -120.0;
+                let sinkhole2 = smoothstep(0.6, 0.15, ((x * scale2 * 1.3 + 1.0).cos() * (z * scale2 * 0.9).sin()).abs()) * -100.0;
+                let sinkhole3 = smoothstep(0.8, 0.3, ((x * scale4 + z * scale4 * 0.5).sin()).abs()) * -150.0;
+                
+                // Collapsed cavern ceilings
+                let collapse_pattern = ((x * scale3).sin() * (z * scale3 * 1.2).cos()).abs();
+                let collapsed = if collapse_pattern > 0.6 { collapse_pattern.powf(2.0) * -80.0 } else { 0.0 };
+                
+                // Underground rivers and channels
+                let river_channel = ((x * 0.003 + z * 0.002).sin()).abs().powf(3.0) * -40.0;
+                
+                // Stalactite and stalagmite fields (surface roughness)
+                let formations = ((x * 0.05).sin() * (z * 0.05).cos()).abs() * 30.0;
+                
+                // Natural bridges over caverns
+                let bridge = smoothstep(0.8, 0.95, ((x * scale2 * 0.7 - z * scale2 * 0.5).sin()).abs()) * 60.0;
+                
+                let height = base + sinkhole1 + sinkhole2 + sinkhole3 + 
+                            collapsed + river_channel + formations + bridge;
+                
+                height.clamp(-300.0, 150.0)
             },
             Biome::Swamp => {
-                // Low, undulating wetlands
-                let scale1 = 0.02 * params.frequency_multiplier;
-                let scale2 = 0.04 * params.frequency_multiplier;
-                let scale3 = 0.08 * params.frequency_multiplier;
+                // Murky swamp terrain with varied water features
+                let scale1 = 0.005;
+                let scale2 = 0.01;
+                let scale3 = 0.03;
+                let scale4 = 0.002;
                 
-                // Gentle undulations
-                let undulation = (x * scale1).sin() * (z * scale1).cos() * params.base_amplitude * 0.3;
-                // Small pools
-                let pools = ((x * scale2).sin() + (z * scale2).cos()) * params.base_amplitude * 0.2;
-                // Muddy bumps
-                let bumps = (x * scale3).sin() * (z * scale3).sin() * params.base_amplitude * 0.1;
+                // Gentle base undulations
+                let undulation = (x * scale1).sin() * (z * scale1 * 0.9).cos() * 25.0;
                 
-                let height = undulation + pools + bumps;
-                height.clamp(params.min_height, params.max_height)
+                // Deep water channels and pools
+                let pools = smoothstep(0.4, 0.7, ((x * scale2).sin() * (z * scale2 * 1.1).cos()).abs()) * -40.0;
+                let channels = ((x * scale4 + z * scale4 * 0.7).sin()).abs().powf(2.0) * -30.0;
+                
+                // Raised hummocks and dry land
+                let hummocks = ((x * scale2 * 1.5).sin() * (z * scale2 * 1.3).cos()).abs().powf(3.0) * 35.0;
+                
+                // Dead trees and root systems (small bumps)
+                let roots = ((x * scale3).sin() * (z * scale3 * 1.2).cos()).abs() * 15.0;
+                
+                // Bog pits and quicksand
+                let bog_pattern = ((x * 0.008 - z * 0.006).sin() * (x * 0.007 + z * 0.009).cos()).abs();
+                let bog_pits = if bog_pattern > 0.7 { bog_pattern.powf(2.0) * -25.0 } else { 0.0 };
+                
+                // Thick vegetation mounds
+                let vegetation = smoothstep(0.3, 0.6, ((x * scale1 * 2.0).sin() * (z * scale1 * 1.8).cos()).abs()) * 20.0;
+                
+                let height = -10.0 + undulation + pools + channels + hummocks + 
+                            roots + bog_pits + vegetation;
+                
+                height.clamp(-100.0, 80.0)
             },
         }
     }
@@ -802,12 +921,12 @@ impl Terrain {
     
     pub fn get_height_at(&self, x: f32, z: f32) -> f32 {
         // Use shader-matched implementation for perfect parity
-        Self::get_blended_biome_height_shader(x, z)
+        Self::get_blended_biome_height(glam::Vec2::new(x, z))
     }
     
     pub fn height_at(x: f32, z: f32) -> f32 {
         // Static version for use without instance
-        Self::get_blended_biome_height_shader(x, z)
+        Self::get_blended_biome_height(glam::Vec2::new(x, z))
     }
     
     pub fn get_biome_at(&self, x: f32, z: f32) -> Biome {
@@ -864,302 +983,546 @@ impl Terrain {
     // ===== SHADER-MATCHED HEIGHT FUNCTIONS =====
     // These functions exactly match the GLSL shader implementation for perfect CPU/GPU parity
     
-    fn get_plains_height_shader(x: f32, z: f32) -> f32 {
-        // Very low frequency for gentle rolling plains
-        let scale1 = 0.0002;
-        let scale2 = 0.0004;
-        
-        // Gentle rolling hills
-        let h1 = (x * scale1).sin() * (z * scale1 * 0.8).cos() * 25.0;
-        let h2 = (x * scale2 + 1.0).sin() * (z * scale2 * 1.2).cos() * 15.0;
-        
-        // Subtle undulations
-        let detail = (x * 0.001).sin() * (z * 0.0008).sin() * 8.0;
-        
-        h1 + h2 + detail
-    }
-    
-    fn get_canyon_height_shader(x: f32, z: f32) -> f32 {
-        // Lower frequency for wider features
-        let scale1 = 0.0008;
-        let scale2 = 0.0004;
-        
-        // Smooth rolling canyon
-        let base = (x * scale1).sin() * (z * scale1 * 0.8).cos() * 60.0;
-        let secondary = (x * scale2 + 1.0).sin() * (z * scale2 * 1.2).cos() * 40.0;
-        
-        // Add some gentle valleys
-        let mut valley = 0.0;
-        valley += smoothstep(0.0, 1.0, (x * 0.001).sin()) * 30.0;
-        valley += smoothstep(0.0, 1.0, (z * 0.0008).cos()) * 20.0;
-        
-        // Gentle undulations instead of cliffs
-        let detail = (x * 0.005).sin() * (z * 0.004).cos() * 10.0;
-        
-        base + secondary - valley + detail
-    }
-    
-    fn get_plateau_height_shader(x: f32, z: f32) -> f32 {
-        // Very low frequency for large, smooth plateaus
-        let scale1 = 0.0002;
-        let scale2 = 0.0003;
-        
-        // Smooth raised areas with tapered edges
-        let raise1 = smoothstep(0.2, 0.8, (x * scale1).sin() * (z * scale1).cos() * 0.5 + 0.5);
-        let raise2 = smoothstep(0.3, 0.7, (x * scale2 + 1.5).sin() * (z * scale2 - 0.8).cos() * 0.5 + 0.5);
-        
-        // Gradual height changes
-        let h1 = raise1 * 60.0;
-        let h2 = raise2 * 40.0;
-        
-        // Rolling surface
-        let surface = (x * 0.001).sin() * (z * 0.0008).cos() * 15.0;
-        
-        // Gentle blend between heights
-        let blend = (x * 0.0001 + z * 0.00015).sin() * 0.5 + 0.5;
-        
-        h1 * (1.0 - blend) + h2 * blend + surface
-    }
-    
-    fn get_crystalline_height_shader(x: f32, z: f32) -> f32 {
-        // Lower frequency for larger crystal formations
+    fn plains_height(p: glam::Vec2) -> f32 {
+        // Rolling plains with more variation
         let scale1 = 0.002;
-        let scale2 = 0.004;
+        let scale2 = 0.007;
+        let scale3 = 0.015;
         
-        // Smooth crystal clusters instead of sharp spikes
-        let cluster1 = smoothstep(0.3, 0.7, (x * scale1).sin() * (z * scale1).cos() * 0.5 + 0.5);
-        let cluster2 = smoothstep(0.4, 0.6, (x * scale2 + 1.0).cos() * (z * scale2 - 0.5).sin() * 0.5 + 0.5);
+        // Larger rolling hills
+        let h1 = (p.x * scale1).sin() * (p.y * scale1).cos() * 40.0;
+        let h2 = (p.x * scale2 + 100.0).sin() * (p.y * scale2 + 100.0).sin() * 20.0;
+        let h3 = (p.x * scale3 + 200.0).cos() * (p.y * scale3 + 200.0).cos() * 10.0;
         
-        // Varied heights with smooth transitions
-        let h1 = cluster1 * 50.0;
-        let h2 = cluster2 * 35.0;
+        // Add some occasional low ridges
+        let ridge = ((p.x * 0.0005 + p.y * 0.0003).sin()).abs().powf(3.0) * 30.0;
         
-        // Gentle crystalline texture
-        let texture = ((x * 0.01).sin() * (z * 0.008).cos()).abs() * 20.0;
+        // Gentle valleys and depressions
+        let depression = smoothstep(0.6, 0.3, ((p.x * 0.0008).sin() * (p.y * 0.0006).cos()).abs()) * -20.0;
         
-        // Smooth base elevation
-        let base = (x * 0.0005).sin() * (z * 0.0004).cos() * 25.0;
-        
-        h1 + h2 + texture + base
+        h1 + h2 + h3 + ridge + depression
     }
     
-    fn get_volcanic_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for broad volcanic features
-        let scale1 = 0.0002;
+    fn canyon_height(p: glam::Vec2) -> f32 {
+        // River-like canyon systems with dramatic depth variations
+        let scale1 = 0.0015; // Main river course
+        let scale2 = 0.003;  // Tributaries
+        let scale3 = 0.006;  // Rapids and falls
+        let scale4 = 0.0005; // Canyon width variation
+        
+        // Main river channel - continuous flowing pattern
+        let river_flow = (p.x * scale1).sin() * 0.7 + (p.y * scale1 * 0.8).cos() * 0.5;
+        let river_meander = ((p.x * scale1 * 0.5 + p.y * scale1 * 0.3).sin() + 
+                            (p.x * scale1 * 0.3 - p.y * scale1 * 0.4).cos()) * 0.4;
+        
+        // Tributary channels joining the main river
+        let tributary1 = ((p.x * scale2 - p.y * scale2 * 0.6).sin() + 
+                         (p.x * scale2 * 0.4 + p.y * scale2).cos()) * 0.3;
+        let tributary2 = ((p.x * scale2 * 1.2 + p.y * scale2 * 0.5).sin() * 
+                         (p.x * scale2 * 0.8 - p.y * scale2 * 0.7).cos()) * 0.25;
+        
+        // River confluence points - deeper where rivers meet
+        let confluence = ((tributary1 * river_flow).abs() + (tributary2 * river_flow).abs()) * 0.5;
+        
+        // Canyon width varies like a real river
+        let width_pattern = (p.x * scale4 + p.y * scale4 * 0.7).sin();
+        let canyon_width = 0.3 + width_pattern.abs() * 0.7 + confluence * 0.3;
+        
+        // River depth with pools and rapids
+        let pool_pattern = ((p.x * scale3).sin() * (p.y * scale3 * 1.2).cos()).abs();
+        let rapids = ((p.x * scale3 * 2.0 + p.y * scale3 * 1.5).sin()).abs().powf(3.0) * 0.3;
+        
+        // Combine all river features
+        let river_depth = (river_flow + river_meander).abs() * canyon_width + 
+                         tributary1.abs() * 0.5 + tributary2.abs() * 0.5 + 
+                         confluence + pool_pattern * 0.4 - rapids;
+        
+        // Create dramatic canyon walls with overhangs
+        let wall_slope = 1.5 + width_pattern * 0.5;
+        let canyon_cut = river_depth.abs().powf(wall_slope) * 2.0; // Deeper canyons
+        
+        // Terraced canyon walls
+        let terraces = ((canyon_cut * 6.0).floor() / 6.0).max(0.0);
+        let final_depth = canyon_cut * 0.4 + terraces * 0.6;
+        
+        // High mesas between canyons
+        let mesa_height = ((p.x * scale4 * 0.5).sin().powi(2) + (p.y * scale4 * 0.5).cos().powi(2)) * 40.0;
+        let plateau_base = 200.0; // Base height for dramatic effect
+        
+        // Create dramatic height difference
+        plateau_base + mesa_height - final_depth * 160.0
+    }
+    
+    fn plateau_height(p: glam::Vec2) -> f32 {
+        // Dramatic mesa and plateau formations with sheer cliffs
+        let scale1 = 0.0008;
         let scale2 = 0.0005;
+        let scale3 = 0.002;
+        let scale4 = 0.0003;
         
-        // Smooth volcanic cone with gentle slopes
-        let dist = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
-        let cone = smoothstep(1.0, 0.0, dist) * 80.0;
+        // Create distinct mesa formations
+        let mesa1 = ((p.x * scale1).sin() * (p.y * scale1 * 0.9).cos()).abs();
+        let mesa2 = ((p.x * scale2 + 200.0).sin() * (p.y * scale2 - 150.0).cos()).abs();
+        let mesa3 = ((p.x * scale4 * 1.3).cos() * (p.y * scale4 + 100.0).sin()).abs();
         
-        // Rolling lava fields
-        let fields = (x * scale2).sin() * (z * scale2 * 0.9).cos() * 25.0;
+        // Sharp cliff edges
+        let cliff_sharpness = 8.0; // Very sharp transitions
+        let mesa_top1 = if mesa1 > 0.4 { 1.0 } else { (mesa1 / 0.4).powf(cliff_sharpness) };
+        let mesa_top2 = if mesa2 > 0.5 { 1.0 } else { (mesa2 / 0.5).powf(cliff_sharpness) };
+        let mesa_top3 = if mesa3 > 0.6 { 1.0 } else { (mesa3 / 0.6).powf(cliff_sharpness) };
         
-        // Gentle surface texture
-        let texture = (x * 0.002).sin() * (z * 0.0018).cos() * 10.0;
+        // Dramatic height differences between plateau levels
+        let base_elevation = -50.0;
+        let tier1_height = 120.0;
+        let tier2_height = 180.0;
+        let tier3_height = 250.0;
         
-        cone + fields + texture
+        // Calculate mesa heights
+        let h1 = base_elevation + mesa_top1 * tier1_height;
+        let h2 = base_elevation + mesa_top2 * tier2_height;
+        let h3 = base_elevation + mesa_top3 * tier3_height;
+        
+        // Natural bridges and arches
+        let arch_pattern = ((p.x * scale3 + p.y * scale3 * 0.7).sin() * 
+                           (p.x * scale3 * 1.2 - p.y * scale3 * 0.5).cos()).abs();
+        let arch_cut = if arch_pattern > 0.7 { arch_pattern.powf(4.0) * -50.0 } else { 0.0 };
+        
+        // Rock spires and hoodoos
+        let spire_pattern = ((p.x * scale3 * 2.0).sin() * (p.y * scale3 * 2.0).cos()).abs();
+        let spires = spire_pattern.powf(6.0) * 40.0;
+        
+        // Weathering and erosion patterns
+        let erosion = ((p.x * 0.01).sin() + (p.y * 0.01).cos()) * 10.0 * (1.0 - mesa_top1.max(mesa_top2).max(mesa_top3));
+        
+        // Combine all plateau features
+        let height = h1.max(h2).max(h3) + spires + arch_cut + erosion;
+        
+        // Add dramatic vertical relief
+        height.clamp(-100.0, 350.0)
     }
     
-    fn get_mountains_height_shader(x: f32, z: f32) -> f32 {
-        // Much lower frequency for broader mountains
-        let scale1 = 0.0002;
-        let scale2 = 0.0004;
+    fn crystalline_height(p: glam::Vec2) -> f32 {
+        // Varied spiky crystal formations
+        let scale1 = 0.01;
+        let scale2 = 0.02;
+        let scale3 = 0.05;
+        let scale4 = 0.007;
         
-        // Smooth gaussian-like peaks instead of sharp ones
-        let dist1 = ((x * scale1).sin().powi(2) + (z * scale1).cos().powi(2)).sqrt();
-        let dist2 = ((x * scale2 + 1.0).sin().powi(2) + (z * scale2 - 0.5).cos().powi(2)).sqrt();
+        // Vary spike sharpness based on position
+        let sharpness1 = 0.8 + ((p.x * 0.001).sin() * (p.y * 0.001).cos() * 0.4);
+        let sharpness2 = 1.2 + ((p.x * 0.002 + 100.0).sin() * (p.y * 0.002).cos() * 0.6);
         
-        // Use gaussian falloff for smooth peaks
-        let h1 = (-dist1 * dist1 * 2.0).exp() * 120.0;
-        let h2 = (-dist2 * dist2 * 3.0).exp() * 80.0;
+        // Different crystal cluster patterns
+        let spike1 = ((p.x * scale1).sin() * (p.y * scale1).cos()).abs().powf(sharpness1) * 150.0;
+        let spike2 = ((p.x * scale2 + 50.0).cos() * (p.y * scale2 - 30.0).sin()).abs().powf(sharpness2) * 105.0;
+        let spike3 = ((p.x * scale3 - 20.0).sin() * (p.y * scale3 + 40.0).cos()).abs() * 60.0;
         
-        // Rolling foothills
-        let mut foothills = 0.0;
-        foothills += (x * 0.0008).sin() * (z * 0.0007).cos() * 30.0;
-        foothills += (x * 0.0012 + 0.5).sin() * (z * 0.001).sin() * 20.0;
+        // Add larger crystal formations
+        let large_crystal = ((p.x * scale4).sin().powi(2) + (p.y * scale4).cos().powi(2)).sqrt();
+        let crystal_height = (1.0 - large_crystal).max(0.0).powf(1.5) * 120.0;
         
-        // Gentle valleys between peaks
-        let valley = (x * 0.0003 + z * 0.0002).sin() * 15.0;
+        // Base elevation variation
+        let base_variation = (p.x * 0.003).sin() * (p.y * 0.003).cos() * 15.0;
         
-        h1 + h2 + foothills + valley
+        let height = spike1 + spike2 + spike3 + crystal_height + base_variation;
+        height.clamp(-100.0, 400.0)
     }
     
-    fn get_desert_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for large dune fields
-        let scale1 = 0.0003;
-        let scale2 = 0.0006;
+    fn volcanic_height(p: glam::Vec2) -> f32 {
+        // Rough terrain with crater-like formations
+        let scale1 = 0.004;
+        let scale2 = 0.008;
+        let scale3 = 0.002;
+        let scale4 = 0.001;
         
-        // Smooth, rolling dunes
-        let dunes = smoothstep(0.3, 0.7, (x * scale1).sin() * (z * scale1 * 1.2).cos() * 0.5 + 0.5) * 30.0;
-        let secondary = (x * scale2 + 0.5).sin() * (z * scale2 * 0.8).cos() * 20.0;
+        // Multiple volcanic craters with varying sizes
+        let crater1 = ((p.x * scale1).sin().powi(2) + (p.y * scale1).cos().powi(2)).sqrt();
+        let crater2 = ((p.x * scale3 + 100.0).sin().powi(2) + (p.y * scale3 - 50.0).cos().powi(2)).sqrt();
+        let crater3 = ((p.x * scale4 * 1.5).sin().powi(2) + (p.y * scale4 * 1.2).cos().powi(2)).sqrt();
         
-        // Gentle ripples
-        let ripples = (x * 0.003).sin() * (z * 0.0025).cos() * 5.0;
+        // Dramatic volcanic cones
+        let h1 = (1.0 - crater1) * 180.0;
+        let h2 = (1.0 - crater2) * 120.0;
+        let h3 = (1.0 - crater3) * 250.0; // Main massive volcano
         
-        dunes + secondary + ripples
+        // Rough lava flows and volcanic debris
+        let rough = (p.x * scale2).sin() * (p.y * scale2).cos() * 80.0;
+        let lava_flow = ((p.x * 0.003 + p.y * 0.002).sin()).abs() * 40.0;
+        
+        // Caldera formations
+        let caldera = if crater1 < 0.3 { -60.0 } else { 0.0 };
+        let caldera2 = if crater3 < 0.4 { -80.0 } else { 0.0 };
+        
+        // Volcanic ridges and fissures
+        let ridge = ((p.x * 0.005 - p.y * 0.003).sin()).abs().powf(2.0) * 60.0;
+        
+        let base_height = h1.max(h2).max(h3) + rough + lava_flow + ridge + caldera + caldera2;
+        base_height.clamp(-150.0, 350.0)
     }
     
-    fn get_arctic_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for smooth, rolling ice sheets
-        let scale1 = 0.0003;
-        let scale2 = 0.0006;
+    fn mountain_height(p: glam::Vec2) -> f32 {
+        // Dramatic mountain ranges with connected peaks and ridgelines
+        let scale1 = 0.0008;  // Major range direction
+        let scale2 = 0.0015;  // Individual peaks
+        let scale3 = 0.0003;  // Range backbone
+        let scale4 = 0.004;   // Rocky details
+        let scale5 = 0.0001;  // Continental scale
         
-        // Smooth rolling glacial terrain
-        let glacial = (x * scale1).sin() * (z * scale1 * 0.9).cos() * 40.0;
-        let sheets = (x * scale2 + 0.5).cos() * (z * scale2 * 1.1).sin() * 30.0;
+        // Major mountain range ridgeline - continuous spine
+        let range_angle: f32 = 0.4; // Northwest to southeast trend
+        let ridge_main = ((p.x * scale3 * range_angle.cos() + p.y * scale3 * range_angle.sin()).sin() * 0.5 + 0.5).powf(3.0);
+        let ridge_secondary = ((p.x * scale3 * 1.2 - p.y * scale3 * 0.7).cos() * 0.5 + 0.5).powf(2.5);
         
-        // Gentle ice dunes
-        let dunes = smoothstep(0.2, 0.8, (x * 0.001).sin() * (z * 0.0008).cos() * 0.5 + 0.5) * 25.0;
+        // Connected peak system along the ridges
+        let peak_spacing = 0.0012;
+        let peak_line1 = ((p.x * peak_spacing * range_angle.cos() + p.y * peak_spacing * range_angle.sin()).sin().powi(2) + 
+                         (p.x * peak_spacing * range_angle.sin() - p.y * peak_spacing * range_angle.cos()).cos().powi(2)).sqrt();
+        let peak_line2 = ((p.x * peak_spacing * 1.3 + 100.0).sin().powi(2) + 
+                         (p.y * peak_spacing * 1.3 - 50.0).cos().powi(2)).sqrt();
         
-        // Subtle surface texture
-        let texture = (x * 0.008).sin() * (z * 0.007).cos() * 10.0;
+        // Create dramatic pointed peaks
+        let peak_sharpness = 2.5; // Higher = sharper peaks
+        let h1 = (1.0 - peak_line1).max(0.0).powf(peak_sharpness) * 270.0;
+        let h2 = (1.0 - peak_line2).max(0.0).powf(peak_sharpness * 0.8) * 225.0;
         
-        // Very gentle crevasses
-        let crevasse = smoothstep(0.4, 0.6, (x * 0.002 + z * 0.0015).sin()) * -15.0;
+        // Ridge height variations - peaks are higher along the ridge
+        let ridge_height = ridge_main * 180.0 + ridge_secondary * 120.0;
         
-        glacial + sheets + dunes + texture + crevasse
+        // Deep valleys between ridges
+        let valley_pattern = (p.x * scale2 + p.y * scale2 * 0.6).sin() + 
+                            (p.x * scale2 * 0.8 - p.y * scale2 * 0.5).cos();
+        let valley_depth = valley_pattern.abs().powf(2.0) * -60.0;
+        
+        // Dramatic cliffs and rock faces
+        let cliff_pattern = ((p.x * scale4).sin() * (p.y * scale4 * 1.2).cos()).abs();
+        let cliffs = cliff_pattern.powf(4.0) * 80.0;
+        
+        // Snow fields and glacial valleys
+        let glacial_valley = ((p.x * scale2 * 0.5 + p.y * scale2 * 0.7).sin()).abs().powf(0.5) * -40.0;
+        let snow_cap = (h1 + h2 + ridge_height).max(225.0) * 0.2;
+        
+        // Foothills that gradually rise to meet the mountains
+        let distance_to_ridge = ((ridge_main - 0.5).abs() + (ridge_secondary - 0.5).abs()).min(1.0);
+        let foothill_height = (1.0 - distance_to_ridge).powf(0.5) * 60.0;
+        
+        // Continental mountain building
+        let tectonic = ((p.x * scale5).sin() + (p.y * scale5 * 0.8).cos()) * 45.0;
+        
+        let height = ridge_height + h1 + h2 + valley_depth + cliffs + 
+                    glacial_valley + snow_cap + foothill_height + tectonic;
+                    
+        // Ensure dramatic height variations
+        height.clamp(-250.0, 450.0)
     }
     
-    fn get_badlands_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for wider, smoother features
-        let scale1 = 0.0004;
-        let scale2 = 0.0008;
+    fn desert_height(p: glam::Vec2) -> f32 {
+        // Sand dune formations with dramatic heights
+        let scale1 = 0.005;
+        let scale2 = 0.01;
+        let scale3 = 0.03;
         
-        // Smooth eroded hills
-        let hills = (x * scale1).sin() * (z * scale1 * 0.8).cos() * 50.0;
-        let erosion = smoothstep(0.3, 0.7, (x * scale2 + 0.7).cos() * (z * scale2 * 1.2).sin() * 0.5 + 0.5) * 30.0;
+        // Large dramatic dunes
+        let dunes = ((p.x * scale1).sin() * (p.y * scale1 * 1.2).cos()).abs() * 80.0;
         
-        // Gentle mesas with sloped sides
-        let mesa = smoothstep(0.2, 0.6, (x * 0.0003).sin() * (z * 0.00025).cos() * 0.5 + 0.5) * 40.0;
+        // Secondary dune fields
+        let secondary = (p.x * scale2 + 30.0).cos() * (p.y * scale2 - 20.0).sin() * 30.0;
         
-        // Rolling badland texture
-        let texture = (x * 0.002).sin() * (z * 0.0018).cos() * 15.0;
+        // Sand ripples and waves
+        let ripples = (p.x * scale3).sin() * (p.y * scale3).cos() * 10.0;
         
-        hills + erosion + mesa + texture
+        // Occasional rock outcroppings
+        let rocks = ((p.x * 0.002).sin() * (p.y * 0.002).cos()).abs().powf(4.0) * 60.0;
+        
+        // Wind-carved hollows
+        let hollows = smoothstep(0.7, 0.5, ((p.x * 0.004 + p.y * 0.003).sin()).abs()) * -30.0;
+        
+        let height = -20.0 + dunes + secondary + ripples + rocks + hollows;
+        height.clamp(-100.0, 200.0)
     }
     
-    fn get_floating_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for large floating islands
-        let scale1 = 0.0002;
-        let scale2 = 0.0004;
+    fn arctic_height(p: glam::Vec2) -> f32 {
+        // Dramatic glacial formations with towering ice
+        let scale1 = 0.005;
+        let scale2 = 0.015;
+        let scale3 = 0.03;
+        let scale4 = 0.002;
+        let scale5 = 0.0008;
         
-        // Smooth floating plateaus
-        let island1 = smoothstep(0.3, 0.7, (x * scale1).sin() * (z * scale1).cos() * 0.5 + 0.5) * 60.0;
-        let island2 = smoothstep(0.4, 0.6, (x * scale2 + 0.8).cos() * (z * scale2 * 0.9).sin() * 0.5 + 0.5) * 40.0;
+        // Massive glacial sheets with dramatic elevation
+        let glacier_flow = ((p.x * scale5).sin() + (p.y * scale5 * 0.7).cos()) * 120.0;
+        let glacier_thickness = ((p.x * scale5 * 0.5).sin().powi(2) + (p.y * scale5 * 0.5).cos().powi(2)) * 90.0;
         
-        // Gentle surface
-        let surface = (x * 0.001).sin() * (z * 0.0008).cos() * 10.0;
+        // Towering ice spires and seracs
+        let serac_sharpness = 3.0 + ((p.x * 0.001).sin() * (p.y * 0.001).cos() * 2.0);
+        let seracs = ((p.x * scale2).sin() * (p.y * scale2).cos()).abs().powf(serac_sharpness) * 225.0;
         
-        80.0 + island1 + island2 + surface
+        // Massive icebergs and pressure ridges
+        let pressure_ridge1 = ((p.x * scale1 + p.y * scale1 * 0.5).sin()).abs().powf(2.0) * 180.0;
+        let pressure_ridge2 = ((p.x * scale1 * 0.8 - p.y * scale1 * 0.6).cos()).abs().powf(2.0) * 135.0;
+        
+        // Deep crevasses and moulins
+        let crevasse_pattern = (p.x * scale3).sin() + (p.y * scale3 * 1.2).cos();
+        let crevasse_depth = crevasse_pattern.abs().powf(4.0) * 120.0;
+        let moulin = ((p.x * scale2 * 2.0 + p.y * scale2 * 1.5).sin() * 
+                     (p.x * scale2 * 1.5 - p.y * scale2 * 2.0).cos()).abs().powf(6.0) * -60.0;
+        
+        // Ice caverns and tunnels
+        let cave_pattern = ((p.x * scale4).sin() * (p.y * scale4 * 0.8).cos()).abs();
+        let ice_caves = if cave_pattern > 0.6 { cave_pattern.powf(3.0) * -40.0 } else { 0.0 };
+        
+        // Frozen waterfalls and ice walls
+        let ice_wall = ((p.x * scale1 * 0.3 + p.y * scale1 * 0.9).sin()).abs().powf(5.0) * 105.0;
+        
+        let height = -20.0 + glacier_flow + glacier_thickness + 
+                    seracs + pressure_ridge1 + pressure_ridge2 + ice_wall - 
+                    crevasse_depth + moulin + ice_caves;
+                    
+        height.clamp(-150.0, 420.0)
     }
     
-    fn get_caverns_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for larger cavern systems
-        let scale1 = 0.0004;
-        let scale2 = 0.0008;
+    fn badlands_height(p: glam::Vec2) -> f32 {
+        // Dramatic eroded landscape with towering formations
+        let scale1 = 0.004;
+        let scale2 = 0.01;
+        let scale3 = 0.025;
+        let scale4 = 0.0015;
+        let scale5 = 0.0006;
         
-        // Rolling base terrain
-        let base = (x * scale1).sin() * (z * scale1 * 0.8).cos() * 40.0;
+        // Massive mesa formations with sheer cliffs
+        let mesa_pattern = ((p.x * scale1).sin() * (p.y * scale1 * 0.8).cos()).abs();
+        let mesa_height = if mesa_pattern > 0.3 { 
+            mesa_pattern.powf(0.2) * 300.0 
+        } else { 
+            mesa_pattern * 75.0 
+        };
         
-        // Smooth depressions instead of sharp holes
-        let depression1 = smoothstep(0.6, 0.3, (x * scale2).sin() * (z * scale2).cos() * 0.5 + 0.5) * -30.0;
-        let depression2 = smoothstep(0.5, 0.2, (x * scale2 * 1.3 + 1.0).cos() * (z * scale2 * 0.9).sin() * 0.5 + 0.5) * -20.0;
+        // Deep erosion channels and slot canyons
+        let erosion_main = (p.x * scale2).sin() + (p.y * scale2 * 1.2).cos();
+        let erosion_branch = (p.x * scale2 * 1.5 - p.y * scale2 * 0.7).sin() * 
+                            (p.x * scale2 * 0.8 + p.y * scale2 * 1.3).cos();
+        let slot_canyon = erosion_main.abs().powf(3.0) * 80.0 + 
+                         erosion_branch.abs().powf(4.0) * 60.0;
         
-        // Gentle undulations
-        let detail = (x * 0.002).sin() * (z * 0.0015).cos() * 10.0;
+        // Towering hoodoos and rock spires
+        let hoodoo_field = ((p.x * scale3).sin() * (p.y * scale3).cos()).abs();
+        let hoodoo_height = hoodoo_field.powf(5.0) * 270.0;
+        let spire_cluster = ((p.x * scale3 * 1.5 + 100.0).sin() * 
+                            (p.y * scale3 * 1.5 - 100.0).cos()).abs().powf(6.0) * 225.0;
         
-        base + depression1 + depression2 + detail
+        // Natural arches and bridges
+        let arch_base = ((p.x * scale4 + p.y * scale4 * 0.6).sin() * 
+                        (p.x * scale4 * 0.7 - p.y * scale4).cos()).abs();
+        let arch_void = if arch_base > 0.7 && mesa_pattern > 0.5 { 
+            arch_base.powf(3.0) * -60.0 
+        } else { 
+            0.0 
+        };
+        
+        // Dramatic layered rock strata
+        let strata_tilt = (p.x * 0.0001 + p.y * 0.00015).sin() * 0.3;
+        let strata = (p.y * scale4 + p.x * strata_tilt).sin() * 0.5 + 0.5;
+        let layer_height = (strata * 12.0).floor() * 10.0;
+        
+        // Scree slopes and talus fields
+        let scree = (p.x * scale5).sin() * (p.y * scale5 * 1.1).cos() * 20.0 * (1.0 - mesa_pattern);
+        
+        let height = mesa_height + hoodoo_height + spire_cluster + 
+                    layer_height + arch_void - slot_canyon + scree;
+                    
+        height.clamp(-250.0, 480.0)
     }
     
-    fn get_swamp_height_shader(x: f32, z: f32) -> f32 {
-        // Low frequency for gentle swamp terrain
-        let scale1 = 0.0005;
-        let scale2 = 0.001;
+    fn floating_height(p: glam::Vec2) -> f32 {
+        // Large floating island formations at extreme heights
+        let scale1 = 0.0008;
+        let scale2 = 0.0015;
+        let scale3 = 0.003;
+        let scale4 = 0.0002;
         
-        // Very gentle undulations
-        let undulation = (x * scale1).sin() * (z * scale1 * 0.9).cos() * 15.0;
-        let pools = smoothstep(0.4, 0.6, (x * scale2).sin() * (z * scale2 * 1.1).cos() * 0.5 + 0.5) * -10.0;
+        // Main floating continents
+        let continent1 = ((p.x * scale4).sin() * (p.y * scale4).cos()).abs().powf(0.5) * 200.0;
+        let continent2 = ((p.x * scale4 * 1.3 + 100.0).cos() * (p.y * scale4 * 0.9 - 50.0).sin()).abs().powf(0.6) * 150.0;
         
-        // Subtle surface variation
-        let surface = (x * 0.003).sin() * (z * 0.0025).cos() * 5.0;
+        // Individual floating islands
+        let island1 = smoothstep(0.3, 0.8, ((p.x * scale1).sin() * (p.y * scale1).cos()).abs()) * 120.0;
+        let island2 = smoothstep(0.4, 0.7, ((p.x * scale2 + 0.8).cos() * (p.y * scale2 * 0.9).sin()).abs()) * 90.0;
         
-        undulation + pools + surface
+        // Rocky spires on the islands
+        let spires = ((p.x * scale3).sin() * (p.y * scale3 * 1.2).cos()).abs().powf(4.0) * 80.0;
+        
+        // Hanging gardens and waterfalls (negative values for overhangs)
+        let overhang = smoothstep(0.7, 0.9, ((p.x * scale2 * 2.0 + p.y * scale2).sin()).abs()) * -40.0;
+        
+        // Crystal formations on underside
+        let crystals = ((p.x * 0.01).sin() * (p.y * 0.01).cos()).abs().powf(3.0) * 60.0;
+        
+        // Base altitude for floating effect
+        let base_altitude = 250.0;
+        
+        // Combine all features
+        let height = base_altitude + continent1.max(continent2) + 
+                    island1.max(island2) + spires + crystals + overhang;
+        
+        height.clamp(150.0, 500.0)
+    }
+    
+    fn caverns_height(p: glam::Vec2) -> f32 {
+        // Extensive underground cavern networks
+        let scale1 = 0.004;
+        let scale2 = 0.008;
+        let scale3 = 0.02;
+        let scale4 = 0.001;
+        
+        // Rolling karst terrain base
+        let base = (p.x * scale1).sin() * (p.y * scale1 * 0.8).cos() * 60.0;
+        
+        // Major sinkholes and cave entrances
+        let sinkhole1 = smoothstep(0.7, 0.2, ((p.x * scale2).sin() * (p.y * scale2).cos()).abs()) * -120.0;
+        let sinkhole2 = smoothstep(0.6, 0.15, ((p.x * scale2 * 1.3 + 1.0).cos() * (p.y * scale2 * 0.9).sin()).abs()) * -100.0;
+        let sinkhole3 = smoothstep(0.8, 0.3, ((p.x * scale4 + p.y * scale4 * 0.5).sin()).abs()) * -150.0;
+        
+        // Collapsed cavern ceilings
+        let collapse_pattern = ((p.x * scale3).sin() * (p.y * scale3 * 1.2).cos()).abs();
+        let collapsed = if collapse_pattern > 0.6 { collapse_pattern.powf(2.0) * -80.0 } else { 0.0 };
+        
+        // Underground rivers and channels
+        let river_channel = ((p.x * 0.003 + p.y * 0.002).sin()).abs().powf(3.0) * -40.0;
+        
+        // Stalactite and stalagmite fields (surface roughness)
+        let formations = ((p.x * 0.05).sin() * (p.y * 0.05).cos()).abs() * 30.0;
+        
+        // Natural bridges over caverns
+        let bridge = smoothstep(0.8, 0.95, ((p.x * scale2 * 0.7 - p.y * scale2 * 0.5).sin()).abs()) * 60.0;
+        
+        let height = base + sinkhole1 + sinkhole2 + sinkhole3 + 
+                    collapsed + river_channel + formations + bridge;
+        
+        height.clamp(-300.0, 150.0)
+    }
+    
+    fn swamp_height(p: glam::Vec2) -> f32 {
+        // Murky swamp terrain with varied water features
+        let scale1 = 0.005;
+        let scale2 = 0.01;
+        let scale3 = 0.03;
+        let scale4 = 0.002;
+        
+        // Gentle base undulations
+        let undulation = (p.x * scale1).sin() * (p.y * scale1 * 0.9).cos() * 25.0;
+        
+        // Deep water channels and pools
+        let pools = smoothstep(0.4, 0.7, ((p.x * scale2).sin() * (p.y * scale2 * 1.1).cos()).abs()) * -40.0;
+        let channels = ((p.x * scale4 + p.y * scale4 * 0.7).sin()).abs().powf(2.0) * -30.0;
+        
+        // Raised hummocks and dry land
+        let hummocks = ((p.x * scale2 * 1.5).sin() * (p.y * scale2 * 1.3).cos()).abs().powf(3.0) * 35.0;
+        
+        // Dead trees and root systems (small bumps)
+        let roots = ((p.x * scale3).sin() * (p.y * scale3 * 1.2).cos()).abs() * 15.0;
+        
+        // Bog pits and quicksand
+        let bog_pattern = ((p.x * 0.008 - p.y * 0.006).sin() * (p.x * 0.007 + p.y * 0.009).cos()).abs();
+        let bog_pits = if bog_pattern > 0.7 { bog_pattern.powf(2.0) * -25.0 } else { 0.0 };
+        
+        // Thick vegetation mounds
+        let vegetation = smoothstep(0.3, 0.6, ((p.x * scale1 * 2.0).sin() * (p.y * scale1 * 1.8).cos()).abs()) * 20.0;
+        
+        let height = -10.0 + undulation + pools + channels + hummocks + 
+                    roots + bog_pits + vegetation;
+        
+        height.clamp(-100.0, 80.0)
     }
     
     // Enhanced biome selection with more variety and smaller regions (matches shader exactly)
-    fn get_biome_height_shader(x: f32, z: f32) -> f32 {
+    fn get_biome_height(p: glam::Vec2) -> f32 {
         // Multi-scale noise for more organic biome distribution
-        let noise1 = (x * 0.0003).sin() * (z * 0.0003).cos();
-        let noise2 = (x * 0.0007 + 1.3).sin() * (z * 0.0006 - 0.7).sin();
-        let noise3 = (x * 0.0013 - 2.1).cos() * (z * 0.0011 + 1.9).sin();
+        let noise1 = (p.x * 0.0003).sin() * (p.y * 0.0003).cos();
+        let noise2 = (p.x * 0.0007 + 1.3).sin() * (p.y * 0.0006 - 0.7).sin();
+        let noise3 = (p.x * 0.0013 - 2.1).cos() * (p.y * 0.0011 + 1.9).sin();
         
         // Combine noises for complex patterns
         let mut biome_noise = noise1 * 0.5 + noise2 * 0.3 + noise3 * 0.2;
         
         // Add local variation for sub-biomes
-        let local_var = (x * 0.01).sin() * (z * 0.01).cos() * 0.1;
+        let local_var = (p.x * 0.01).sin() * (p.y * 0.01).cos() * 0.1;
         biome_noise += local_var;
         
         // 12 biome types distributed across the noise range
         if biome_noise < -0.7 {
-            Self::get_canyon_height_shader(x, z)
+            Self::canyon_height(p)
         } else if biome_noise < -0.5 {
-            Self::get_caverns_height_shader(x, z)
+            Self::caverns_height(p)
         } else if biome_noise < -0.3 {
-            Self::get_badlands_height_shader(x, z)
+            Self::badlands_height(p)
         } else if biome_noise < -0.1 {
-            Self::get_plateau_height_shader(x, z)
+            Self::plateau_height(p)
         } else if biome_noise < 0.1 {
-            Self::get_plains_height_shader(x, z)
+            Self::plains_height(p)
         } else if biome_noise < 0.25 {
-            Self::get_desert_height_shader(x, z)
+            Self::desert_height(p)
         } else if biome_noise < 0.4 {
-            Self::get_swamp_height_shader(x, z)
+            Self::swamp_height(p)
         } else if biome_noise < 0.5 {
-            Self::get_crystalline_height_shader(x, z)
+            Self::crystalline_height(p)
         } else if biome_noise < 0.6 {
-            Self::get_volcanic_height_shader(x, z)
+            Self::volcanic_height(p)
         } else if biome_noise < 0.7 {
-            Self::get_arctic_height_shader(x, z)
+            Self::arctic_height(p)
         } else if biome_noise < 0.8 {
-            Self::get_floating_height_shader(x, z)
+            Self::floating_height(p)
         } else {
-            Self::get_mountains_height_shader(x, z)
+            Self::mountain_height(p)
         }
     }
     
     // Smooth blending between biomes (matches shader exactly)
-    fn get_blended_biome_height_shader(x: f32, z: f32) -> f32 {
+    fn get_blended_biome_height(p: glam::Vec2) -> f32 {
         // Sample multiple nearby points for smoother transitions
-        let sample_dist = 50.0;
-        let h_center = Self::get_biome_height_shader(x, z);
-        let h_north = Self::get_biome_height_shader(x, z + sample_dist);
-        let h_south = Self::get_biome_height_shader(x, z - sample_dist);
-        let h_east = Self::get_biome_height_shader(x + sample_dist, z);
-        let h_west = Self::get_biome_height_shader(x - sample_dist, z);
+        let sample_dist = 100.0; // Increased for larger features
+        let h_center = Self::get_biome_height(p);
+        let h_north = Self::get_biome_height(glam::Vec2::new(p.x, p.y + sample_dist));
+        let h_south = Self::get_biome_height(glam::Vec2::new(p.x, p.y - sample_dist));
+        let h_east = Self::get_biome_height(glam::Vec2::new(p.x + sample_dist, p.y));
+        let h_west = Self::get_biome_height(glam::Vec2::new(p.x - sample_dist, p.y));
         
-        // Average nearby samples for smoother terrain
-        let primary_height = (h_center * 2.0 + h_north + h_south + h_east + h_west) / 6.0;
+        // Weighted average for smoother transitions
+        let primary_height = (h_center * 3.0 + h_north + h_south + h_east + h_west) / 7.0;
         
-        // Add rolling hills with lower frequency
-        let mut hills = 0.0;
-        hills += (x * 0.0001).sin() * (z * 0.00012).cos() * 60.0;
-        hills += (x * 0.00018 + 1.5).sin() * (z * 0.00015 - 0.7).cos() * 40.0;
-        hills += (x * 0.00025 - 0.3).sin() * (z * 0.0003 + 1.2).cos() * 25.0;
+        // Enhanced fractal noise with more octaves for detail
+        let mut fractal_noise = 0.0;
+        let mut amplitude = 60.0; // Increased base amplitude
+        let mut frequency = 0.0005;
+        for i in 0..7 { // More octaves for finer detail
+            fractal_noise += (p.x * frequency).sin() * (p.y * frequency).cos() * amplitude;
+            fractal_noise += (p.x * frequency * 1.7 + 100.0).sin() * (p.y * frequency * 1.7 + 100.0).cos() * amplitude * 0.7;
+            amplitude *= 0.45; // Slower falloff for more influence from each octave
+            frequency *= 2.3;
+        }
         
-        // Add gentle undulations
-        let mut undulation = 0.0;
-        undulation += (x * 0.0004).sin() * (z * 0.0004).cos() * 15.0;
-        undulation += (x * 0.0008 + 2.1).sin() * (z * 0.0007 - 1.3).sin() * 10.0;
+        // Larger scale continental features
+        let continent_scale = 0.0001; // Even larger scale
+        let continental = ((p.x * continent_scale).sin() * (p.y * continent_scale * 0.8).cos() + 
+                          (p.x * continent_scale * 0.3).cos() * (p.y * continent_scale * 1.2).sin()) * 120.0; // More dramatic
         
-        // Very gentle large scale features
-        let continent_scale = 0.00005;
-        let continental = (x * continent_scale).sin() * (z * continent_scale).cos() * 30.0;
+        // Erosion simulation - smooth out steep areas
+        let slope_factor = ((p.x * 0.005).sin() - (p.x * 0.005 + 1.0).sin()).abs() + 
+                          ((p.y * 0.005).sin() - (p.y * 0.005 + 1.0).sin()).abs();
+        let erosion = slope_factor.min(1.0) * 0.3;
         
-        // Smooth everything together
-        let height = primary_height * 0.7 + hills * 0.2 + undulation * 0.1;
+        // Terracing effect - make it much more subtle
+        let terrace_height = 100.0; // Increased from 40 to make terraces less frequent
+        let terraced = if primary_height > 0.0 {
+            let terrace_level = (primary_height / terrace_height).floor();
+            let terrace_fract = (primary_height / terrace_height).fract();
+            terrace_level * terrace_height + terrace_fract.powf(2.0) * terrace_height
+        } else {
+            primary_height
+        };
         
-        height + continental
+        // Mix terraced and smooth terrain - reduce terrace influence significantly
+        let terrace_influence = ((p.x * 0.001 + p.y * 0.0008).sin() * 0.5 + 0.5).clamp(0.0, 1.0) * 0.2; // Max 20% terrace influence
+        let height = terraced * terrace_influence + primary_height * (1.0 - terrace_influence);
+        
+        height + fractal_noise + continental * (1.0 - erosion)
     }
 }
