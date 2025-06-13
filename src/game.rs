@@ -10,7 +10,7 @@ fn terrain_height_at(x: f32, z: f32) -> f32 {
     crate::terrain::Terrain::height_at(x, z)
 }
 use crate::bullet::{Bullet, BulletType};
-use crate::particle::Particle;
+use crate::particle::{Particle, ParticleType};
 use crate::renderer::Renderer;
 use crate::base::{Base, BaseType};
 use glam::Vec3;
@@ -234,7 +234,7 @@ impl Game {
             for _ in 0..10 {
                 // Offset particle spawn slightly above terrain impact
                 let particle_pos = *hit_pos + Vec3::new(0.0, 5.0, 0.0);
-                self.particles.push(Particle::new(particle_pos));
+                self.particles.push(Particle::new_with_type(particle_pos, ParticleType::Spark));
             }
         }
         
@@ -526,13 +526,13 @@ impl Game {
                             
                             // Create impact particles
                             for _ in 0..10 {
-                                self.particles.push(Particle::new(bullet.pos));
+                                self.particles.push(Particle::new_with_type(bullet.pos, ParticleType::Spark));
                             }
                             
                             if !base.is_active {
                                 // Base destroyed - big explosion
                                 for _ in 0..50 {
-                                    self.particles.push(Particle::new(base.pos));
+                                    self.particles.push(Particle::new_with_type(base.pos, ParticleType::Debris));
                                 }
                                 self.score += 500; // Bonus for destroying base
                             }
@@ -576,13 +576,16 @@ impl Game {
             if self.bases[base_idx].damage_ground_turret(turret_idx, 25.0) {
                 // Turret destroyed
                 for _ in 0..20 {
-                    self.particles.push(Particle::new(turret_pos));
+                    self.particles.push(Particle::new_with_type(turret_pos, ParticleType::Explosion));
                 }
                 self.score += 100; // Points for destroying turret
             } else {
                 // Just damaged
-                for _ in 0..5 {
-                    self.particles.push(Particle::new(bullet_pos));
+                for _ in 0..3 {
+                    self.particles.push(Particle::new_with_type(bullet_pos, ParticleType::Spark));
+                }
+                for _ in 0..2 {
+                    self.particles.push(Particle::new_with_type(bullet_pos, ParticleType::Debris));
                 }
             }
         }
@@ -598,8 +601,14 @@ impl Game {
                             enemies_to_remove.push(ei);
                             
                             // Create explosion particles
-                            for _ in 0..15 {
-                                self.particles.push(Particle::new(enemy.pos));
+                            for _ in 0..8 {
+                                self.particles.push(Particle::new_with_type(enemy.pos, ParticleType::Explosion));
+                            }
+                            for _ in 0..12 {
+                                self.particles.push(Particle::new_with_type(enemy.pos, ParticleType::Spark));
+                            }
+                            for _ in 0..5 {
+                                self.particles.push(Particle::new_with_type(enemy.pos, ParticleType::Debris));
                             }
                             
                             self.score += match enemy.enemy_type {
@@ -637,14 +646,17 @@ impl Game {
                             // Shield didn't absorb it - player is hit
                             self.player_invulnerable_timer = 1.0;
                             
-                            // Create hit effect
+                            // Create hit effect - explosion and sparks
+                            for _ in 0..10 {
+                                self.particles.push(Particle::new_with_type(self.player.pos, ParticleType::Explosion));
+                            }
                             for _ in 0..15 {
-                                self.particles.push(Particle::new(self.player.pos));
+                                self.particles.push(Particle::new_with_type(self.player.pos, ParticleType::Spark));
                             }
                         } else {
-                            // Shield absorbed the hit
-                            for _ in 0..5 {
-                                self.particles.push(Particle::new(self.player.pos));
+                            // Shield absorbed the hit - shield particles
+                            for _ in 0..8 {
+                                self.particles.push(Particle::new_with_type(self.player.pos, ParticleType::Shield));
                             }
                         }
                     }
@@ -679,8 +691,12 @@ impl Game {
                     self.player_invulnerable_timer = 1.0;
                 }
                 
-                for _ in 0..20 {
-                    self.particles.push(Particle::new(enemy.pos));
+                // Big explosion for enemy collision
+                for _ in 0..15 {
+                    self.particles.push(Particle::new_with_type(enemy.pos, ParticleType::Explosion));
+                }
+                for _ in 0..10 {
+                    self.particles.push(Particle::new_with_type(enemy.pos, ParticleType::Debris));
                 }
             }
             
@@ -704,7 +720,7 @@ impl Game {
                     if dist_to_laser < 30.0 {
                         // Player hit by laser
                         for _ in 0..15 {
-                            self.particles.push(Particle::new(self.player.pos));
+                            self.particles.push(Particle::new_with_type(self.player.pos, ParticleType::Spark));
                         }
                         self.player_invulnerable_timer = 2.0; // Longer invulnerability for laser hits
                     }
@@ -722,7 +738,7 @@ impl Game {
                     
                     // Create explosion
                     for _ in 0..25 {
-                        self.particles.push(Particle::new(mine.pos));
+                        self.particles.push(Particle::new_with_type(mine.pos, ParticleType::Explosion));
                     }
                     
                     if self.player_invulnerable_timer <= 0.0 {

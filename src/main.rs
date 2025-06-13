@@ -12,6 +12,7 @@ mod biome;
 mod player;
 mod enemy;
 mod bullet;
+mod bullet_instanced;
 mod particle;
 mod mine;
 mod crystal;
@@ -26,6 +27,7 @@ mod sounds;
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
 use bullet::BulletType;
+use bullet_instanced::BulletInstancingSystem;
 use enemy::{EnemyType, AlertState};
 use hud::HUD;
 use camera::Camera;
@@ -71,8 +73,11 @@ struct Stage {
     line_pipeline: Pipeline,
     triangle_pipeline: Pipeline,
     terrain_pipeline: Pipeline,
+    bullet_pipeline: Pipeline,
+    bullet_glow_pipeline: Pipeline,
     bindings: Bindings,
     terrain_bindings: Bindings,
+    bullet_bindings: Bindings,
     game: Game,
     camera: Camera,
     input: InputState,
@@ -90,6 +95,8 @@ struct Stage {
     mouse_captured: bool,
     // Sound system
     sound_system: SoundSystem,
+    // Bullet instancing
+    bullet_instance_system: BulletInstancingSystem,
 }
 
 #[derive(Clone)]
@@ -217,6 +224,87 @@ impl Stage {
                 ..Default::default()
             },
         );
+        
+        // Create bullet shader and pipeline
+        let bullet_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: shader::VERTEX_INSTANCED_BULLET,
+                fragment: shader::FRAGMENT,
+            },
+            shader::meta()
+        ).expect("Failed to create bullet shader");
+        
+        let bullet_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout {
+                    step_func: VertexStep::PerVertex,
+                    stride: 24, // 6 floats * 4 bytes
+                    ..Default::default()
+                },
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    stride: 16, // 4 floats * 4 bytes (3 for position + 1 for scale)
+                    ..Default::default()
+                }
+            ],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+                VertexAttribute::with_buffer("instance_position", VertexFormat::Float3, 1),
+                VertexAttribute::with_buffer("instance_scale", VertexFormat::Float1, 1),
+            ],
+            bullet_shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
+                cull_face: CullFace::Nothing,
+                ..Default::default()
+            },
+        );
+        
+        // Create bullet glow shader and pipeline
+        let bullet_glow_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: shader::VERTEX_INSTANCED_BULLET,
+                fragment: shader::FRAGMENT_GLOW,
+            },
+            shader::meta()
+        ).expect("Failed to create bullet glow shader");
+        
+        let bullet_glow_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout {
+                    step_func: VertexStep::PerVertex,
+                    stride: 24, // 6 floats * 4 bytes
+                    ..Default::default()
+                },
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    stride: 16, // 4 floats * 4 bytes (3 for position + 1 for scale)
+                    ..Default::default()
+                }
+            ],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+                VertexAttribute::with_buffer("instance_position", VertexFormat::Float3, 1),
+                VertexAttribute::with_buffer("instance_scale", VertexFormat::Float1, 1),
+            ],
+            bullet_glow_shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: false, // Don't write depth for glow
+                cull_face: CullFace::Nothing,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::One  // Additive blending
+                )),
+                ..Default::default()
+            },
+        );
 
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -246,14 +334,33 @@ impl Stage {
             index_buffer: dummy_buffer,
             images: vec![],
         };
+        
+        // Create bullet instance system with a reasonable max bullet count
+        let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
+        let bullet_instance_system = unsafe {
+            BulletInstancingSystem::new(&mut *ctx_ptr, 10000)
+        };
+        
+        // Create bullet bindings
+        let bullet_bindings = Bindings {
+            vertex_buffers: vec![
+                bullet_instance_system.vertex_buffer(),
+                bullet_instance_system.instance_buffer()
+            ],
+            index_buffer: bullet_instance_system.index_buffer(),
+            images: vec![],
+        };
 
         let stage = Self {
             ctx,
             line_pipeline,
             triangle_pipeline,
             terrain_pipeline,
+            bullet_pipeline,
+            bullet_glow_pipeline,
             bindings,
             terrain_bindings,
+            bullet_bindings,
             game: Game::new(),
             camera: Camera::new(),
             input: InputState::default(),
@@ -267,6 +374,7 @@ impl Stage {
             fullscreen: true,
             mouse_captured: true,
             sound_system: SoundSystem::new(),
+            bullet_instance_system,
         };
         
         // Start in fullscreen with mouse captured
@@ -734,27 +842,98 @@ impl EventHandler for Stage {
             }
         }
         
-        // Draw player bullets in yellow
+        // Draw all bullets using instancing
+        {
+            // Update bullet instances
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            let instance_count = unsafe {
+                self.bullet_instance_system.update_instances(&mut *ctx_ptr, &self.game.bullets)
+            };
+            
+            if instance_count > 0 {
+                // Draw player bullets in yellow
+                let player_bullets: Vec<_> = self.game.bullets.iter()
+                    .filter(|b| matches!(b.bullet_type, BulletType::Player))
+                    .cloned()
+                    .collect();
+                
+                let player_instance_count = unsafe {
+                    self.bullet_instance_system.update_instances(&mut *ctx_ptr, &player_bullets)
+                };
+                
+                if player_instance_count > 0 {
+                    // First pass: Draw solid bullets
+                    self.ctx.apply_pipeline(&self.bullet_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0]))); // Yellow
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), player_instance_count);
+                    
+                    // Second pass: Draw glow
+                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.2]))); // Bright yellow glow
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), player_instance_count);
+                }
+                
+                // Draw enemy bullets in orange
+                let enemy_bullets: Vec<_> = self.game.bullets.iter()
+                    .filter(|b| matches!(b.bullet_type, BulletType::Enemy))
+                    .cloned()
+                    .collect();
+                
+                let enemy_instance_count = unsafe {
+                    self.bullet_instance_system.update_instances(&mut *ctx_ptr, &enemy_bullets)
+                };
+                
+                if enemy_instance_count > 0 {
+                    // First pass: Draw solid bullets
+                    self.ctx.apply_pipeline(&self.bullet_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), enemy_instance_count);
+                    
+                    // Second pass: Draw glow
+                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.3, 0.0]))); // Orange glow
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), enemy_instance_count);
+                }
+                
+                // Draw heavy turret bullets in white
+                let turret_bullets: Vec<_> = self.game.bullets.iter()
+                    .filter(|b| matches!(b.bullet_type, BulletType::HeavyTurret))
+                    .cloned()
+                    .collect();
+                
+                let turret_instance_count = unsafe {
+                    self.bullet_instance_system.update_instances(&mut *ctx_ptr, &turret_bullets)
+                };
+                
+                if turret_instance_count > 0 {
+                    // First pass: Draw solid bullets
+                    self.ctx.apply_pipeline(&self.bullet_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // White
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), turret_instance_count);
+                    
+                    // Second pass: Draw glow
+                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
+                    self.ctx.apply_bindings(&self.bullet_bindings);
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.8, 0.8, 1.0]))); // Blueish-white glow
+                    self.ctx.draw(0, self.bullet_instance_system.index_count(), turret_instance_count);
+                }
+            }
+        }
+        
+        // Draw particles as triangles with different colors
         vertices.clear();
         indices.clear();
         
         {
             let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Lines);
+            renderer.set_mode(RenderMode::Triangles);
             
-            // Draw debug cross
-            if SHOW_DEBUG_CROSS {
-                renderer.draw_line(Vec3::new(-DEBUG_CROSS_SIZE, 0.0, 0.0), Vec3::new(DEBUG_CROSS_SIZE, 0.0, 0.0));
-                renderer.draw_line(Vec3::new(0.0, -DEBUG_CROSS_SIZE, 0.0), Vec3::new(0.0, DEBUG_CROSS_SIZE, 0.0));
-                renderer.draw_line(Vec3::new(0.0, 0.0, -DEBUG_CROSS_SIZE), Vec3::new(0.0, 0.0, DEBUG_CROSS_SIZE));
-            }
-            
-            // Draw player bullets
-            for bullet in &self.game.bullets {
-                if matches!(bullet.bullet_type, BulletType::Player) {
-                    bullet.draw(&mut renderer);
-                }
-            }
+            // Draw particles
             for particle in &self.game.particles {
                 particle.draw(&mut renderer);
             }
@@ -763,61 +942,37 @@ impl EventHandler for Stage {
         if !vertices.is_empty() {
             self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.line_pipeline);
+            self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0]))); // Yellow
+            // Use bright colors for particles - they'll fade with alpha in the shader
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.8, 0.3]))); // Orange-yellow
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
-        // Draw enemy bullets in orange/red
-        vertices.clear();
-        indices.clear();
-        
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Lines);
+        // Draw debug cross using lines
+        if SHOW_DEBUG_CROSS {
+            vertices.clear();
+            indices.clear();
             
-            // Draw regular enemy bullets
-            for bullet in &self.game.bullets {
-                if matches!(bullet.bullet_type, BulletType::Enemy) {
-                    bullet.draw(&mut renderer);
-                }
+            {
+                let mut renderer = Renderer::new(&mut vertices, &mut indices);
+                renderer.set_mode(RenderMode::Lines);
+                
+                renderer.draw_line(Vec3::new(-DEBUG_CROSS_SIZE, 0.0, 0.0), Vec3::new(DEBUG_CROSS_SIZE, 0.0, 0.0));
+                renderer.draw_line(Vec3::new(0.0, -DEBUG_CROSS_SIZE, 0.0), Vec3::new(0.0, DEBUG_CROSS_SIZE, 0.0));
+                renderer.draw_line(Vec3::new(0.0, 0.0, -DEBUG_CROSS_SIZE), Vec3::new(0.0, 0.0, DEBUG_CROSS_SIZE));
+            }
+            
+            if !vertices.is_empty() {
+                self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+                self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+                self.ctx.apply_pipeline(&self.line_pipeline);
+                self.ctx.apply_bindings(&self.bindings);
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // White
+                self.ctx.draw(0, indices.len() as i32, 1);
             }
         }
         
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.line_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
-            self.ctx.draw(0, indices.len() as i32, 1);
-        }
-        
-        // Draw heavy turret bullets in bright white
-        vertices.clear();
-        indices.clear();
-        
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Lines); // Use lines for better visibility
-            
-            // Draw heavy turret bullets
-            for bullet in &self.game.bullets {
-                if matches!(bullet.bullet_type, BulletType::HeavyTurret) {
-                    bullet.draw(&mut renderer);
-                }
-            }
-        }
-        
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.line_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // Bright white
-            self.ctx.draw(0, indices.len() as i32, 1);
-        }
         
         // Draw laser beams in two passes - lines for core and triangles for glow
         vertices.clear();

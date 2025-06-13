@@ -14,6 +14,22 @@ void main() {
     gl_Position = mvp * vec4(pos, 1.0);
 }"#;
 
+pub const VERTEX_INSTANCED_BULLET: &str = r#"#version 100
+attribute vec3 pos;
+attribute vec3 barycentric;
+attribute vec3 instance_position;
+attribute float instance_scale;
+
+uniform mat4 mvp;
+
+varying vec3 v_barycentric;
+
+void main() {
+    v_barycentric = barycentric;
+    vec3 world_pos = pos * instance_scale + instance_position;
+    gl_Position = mvp * vec4(world_pos, 1.0);
+}"#;
+
 pub const VERTEX_INSTANCED_TERRAIN: &str = r#"#version 100
 precision mediump float;
 
@@ -681,6 +697,28 @@ void main() {
             gl_FragColor = vec4(color, 1.0); // Bright version for edges
         }
     }
+}"#;
+
+pub const FRAGMENT_GLOW: &str = r#"#version 100
+precision mediump float;
+
+uniform vec3 color;
+
+varying vec3 v_barycentric;
+
+void main() {
+    // Calculate distance to nearest edge
+    float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
+    
+    // Create a bright core with falloff
+    float intensity = 1.0 - minBary * 2.0;
+    intensity = max(0.0, intensity);
+    
+    // Add extra brightness to the center
+    float coreBrightness = 1.0 + intensity * 2.0;
+    
+    // Output bright, saturated color with additive blending
+    gl_FragColor = vec4(color * coreBrightness, intensity * 0.8);
 }"#;
 
 pub fn meta() -> ShaderMeta {
