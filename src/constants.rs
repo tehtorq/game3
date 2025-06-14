@@ -27,7 +27,7 @@ pub const CAMERA_FOV: f32 = 60.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 
 /// Far clipping plane distance
-pub const CAMERA_FAR: f32 = 10000.0;
+pub const CAMERA_FAR: f32 = 20000.0; // Increased to see full 1024x1024 grid
 
 /// Default camera distance from player
 pub const CAMERA_DISTANCE: f32 = 150.0;

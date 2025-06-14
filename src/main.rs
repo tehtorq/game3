@@ -12,6 +12,11 @@ mod terrain_generation;
 mod terrain_cpu;
 mod terrain_lod_blend;
 mod terrain_batch;
+mod terrain_gpu_batch;
+mod terrain_predictive;
+mod terrain_clipmap;
+mod terrain_gpu_rings;
+mod terrain_gpu_grid;
 mod biome;
 mod player;
 mod enemy;
@@ -42,6 +47,12 @@ use sounds::{SoundSystem, MusicState};
 
 // Default screen dimensions are now dynamically calculated at 75% of monitor size
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TerrainMode {
+    ChunkBased,  // Current implementation
+    GPUGrid,     // Simple grid-based GPU terrain
+}
+
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
     line_pipeline: Pipeline,
@@ -56,6 +67,9 @@ struct Stage {
     input: InputState,
     paused: bool,
     terrain_cpu: terrain_cpu::TerrainCPU,
+    terrain_gpu_rings: Option<terrain_gpu_rings::TerrainGPURings>,
+    terrain_gpu_grid: Option<terrain_gpu_grid::TerrainGPUGrid>,
+    terrain_mode: TerrainMode,
     terrain_simple_pipeline: Pipeline,
     hud: HUD,
     // FPS tracking fields
@@ -297,8 +311,12 @@ impl Stage {
         // Create CPU-based terrain system
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
         let terrain_cpu = unsafe {
-            terrain_cpu::TerrainCPU::new(&mut *ctx_ptr, 15) // 15 chunks = 2400 unit view distance
+            terrain_cpu::TerrainCPU::new(&mut *ctx_ptr, 60) // 60 chunks = 9600 unit view distance
         };
+        
+        // GPU terrain alternatives (created on demand)
+        let terrain_gpu_rings = None;
+        let terrain_gpu_grid = None;
         
         let stage = Self {
             ctx,
@@ -315,6 +333,9 @@ impl Stage {
             input: InputState::default(),
             paused: false,
             terrain_cpu,
+            terrain_gpu_rings,
+            terrain_gpu_grid,
+            terrain_mode: TerrainMode::ChunkBased,
             hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
@@ -415,6 +436,8 @@ impl EventHandler for Stage {
         let delta_time = current_time - self.last_frame_time;
         self.last_frame_time = current_time;
         
+        let frame_start = miniquad::date::now();
+        
         self.frame_count += 1;
         self.fps_timer += delta_time;
         
@@ -423,14 +446,20 @@ impl EventHandler for Stage {
             let fps = self.frame_count as f64 / self.fps_timer;
             println!("FPS: {:.1}", fps);
             println!("Enemies: {}", self.game.enemies.len());
+            println!("Active terrain chunks: {}", self.terrain_cpu.active_chunks_count());
             self.frame_count = 0;
             self.fps_timer = 0.0;
         }
         
-        // Update terrain chunks based on player position
-        let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-        unsafe {
-            self.terrain_cpu.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
+        // Update terrain based on selected mode
+        match self.terrain_mode {
+            TerrainMode::ChunkBased => {
+                let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+                unsafe {
+                    self.terrain_cpu.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
+                }
+            },
+            _ => {} // GPU terrain doesn't need position updates
         }
         
         // Set up view and projection matrices
@@ -447,10 +476,30 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
-        // Draw CPU-based terrain chunks
-        let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-        unsafe {
-            self.terrain_cpu.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp.to_cols_array_2d(), [0.0, 1.0, 0.0]);
+        // Draw terrain based on selected mode
+        let terrain_triangles = match self.terrain_mode {
+            TerrainMode::ChunkBased => {
+                let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+                unsafe {
+                    self.terrain_cpu.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp.to_cols_array_2d(), [0.0, 1.0, 0.0], self.game.player.pos)
+                }
+            },
+            TerrainMode::GPUGrid => {
+                if let Some(ref grid) = self.terrain_gpu_grid {
+                    let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+                    unsafe {
+                        grid.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos)
+                    }
+                } else {
+                    0
+                }
+            },
+            _ => 0,
+        };
+        
+        // Log terrain performance periodically
+        if self.frame_count % 300 == 0 && terrain_triangles > 0 {
+            println!("Terrain mode: {:?}, triangles: {}", self.terrain_mode, terrain_triangles);
         }
         
         // Draw bases first (in red/orange)
@@ -1156,6 +1205,26 @@ impl EventHandler for Stage {
             }
             KeyCode::Minus | KeyCode::KpSubtract => self.hud.zoom_out(),
             KeyCode::Equal | KeyCode::KpAdd => self.hud.zoom_in(),
+            KeyCode::T => {
+                // Cycle through terrain modes
+                self.terrain_mode = match self.terrain_mode {
+                    TerrainMode::ChunkBased => {
+                        println!("Switching to GPU Grid terrain");
+                        // Create GPU grid terrain if not exists
+                        if self.terrain_gpu_grid.is_none() {
+                            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+                            self.terrain_gpu_grid = Some(unsafe {
+                                terrain_gpu_grid::TerrainGPUGrid::new(&mut *ctx_ptr)
+                            });
+                        }
+                        TerrainMode::GPUGrid
+                    },
+                    TerrainMode::GPUGrid => {
+                        println!("Switching to Chunk-based terrain");
+                        TerrainMode::ChunkBased
+                    },
+                };
+            },
             _ => {}
         }
     }

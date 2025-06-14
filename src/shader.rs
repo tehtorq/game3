@@ -1,5 +1,5 @@
 use miniquad::*;
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 
 pub const VERTEX: &str = r#"#version 100
 attribute vec3 pos;
@@ -15,27 +15,111 @@ void main() {
 }"#;
 
 pub const VERTEX_TERRAIN_SIMPLE: &str = r#"#version 100
+precision highp float;
+
 attribute vec3 pos;
 attribute vec3 barycentric;
 
 uniform mat4 mvp;
+uniform float morph_factor;  // For geomorphing between LODs
+uniform vec2 chunk_offset;   // Chunk position in world
+uniform float lod_scale;     // Grid spacing for current LOD
+uniform vec3 camera_pos;     // Camera/player position for fog
 
 varying vec3 v_barycentric;
 varying float v_height;
 varying float v_fog;
+varying vec3 v_normal;
+
+// Fast GPU noise
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.13);
+    p3 += dot(p3, p3.yzx + 3.333);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+// Optimized GPU terrain generation 
+float terrain_height(vec2 p) {
+    float height = 0.0;
+    float amplitude = 100.0;
+    float frequency = 0.001;
+    
+    // Reduce octaves for distant terrain based on morph_factor
+    int octaves = morph_factor > 0.5 ? 3 : 5;
+    
+    // Multiple octaves
+    for (int i = 0; i < octaves; i++) {
+        height += (noise(p * frequency) - 0.5) * amplitude;
+        amplitude *= 0.45;
+        frequency *= 2.3;
+    }
+    
+    // Large scale features - only for close terrain
+    if (morph_factor < 0.5) {
+        height += sin(p.x * 0.0001) * 120.0 * cos(p.y * 0.00008);
+        height += cos(p.y * 0.0001) * 120.0 * sin(p.x * 0.00012);
+    }
+    
+    return height;
+}
 
 void main() {
     v_barycentric = barycentric;
-    v_height = pos.y;
     
-    vec4 world_pos = mvp * vec4(pos, 1.0);
+    // Calculate world position - grid follows player
+    vec2 world_xz = pos.xz + chunk_offset;
     
-    // Calculate fog based on distance from camera
-    float distance = length(world_pos.xyz);
-    // Much reduced fog - starts very far out
-    v_fog = 1.0 - smoothstep(20000.0, 40000.0, distance);
+    // Apply distance-based vertex culling for optimization
+    float dist_from_center = length(pos.xz);
+    float max_dist = 15000.0; // Cull vertices beyond 15km to see full 1024x1024 grid
     
-    gl_Position = world_pos;
+    // Generate height on GPU
+    float height = terrain_height(world_xz);
+    
+    // Geomorphing for smooth LOD transitions
+    float morph_height = height;
+    if (morph_factor > 0.001 && dist_from_center < max_dist) {
+        // Calculate grid-snapped position for next LOD
+        vec2 grid_size = vec2(lod_scale * 2.0);
+        vec2 snapped_pos = floor(world_xz / grid_size + 0.5) * grid_size;
+        float snapped_height = terrain_height(snapped_pos);
+        
+        // Smooth blend between current and next LOD position
+        morph_height = mix(height, snapped_height, morph_factor);
+        world_xz = mix(world_xz, snapped_pos, morph_factor);
+    }
+    
+    v_height = morph_height;
+    vec3 final_pos = vec3(world_xz.x, morph_height, world_xz.y);
+    
+    // Calculate normal - use larger delta for distant terrain
+    float delta = mix(2.0, 8.0, morph_factor); // Larger delta for LOD terrain
+    float hL = terrain_height(world_xz - vec2(delta, 0.0));
+    float hR = terrain_height(world_xz + vec2(delta, 0.0));
+    float hD = terrain_height(world_xz - vec2(0.0, delta));
+    float hU = terrain_height(world_xz + vec2(0.0, delta));
+    
+    v_normal = normalize(vec3(hL - hR, 2.0 * delta, hD - hU));
+    
+    // Fog calculation - distance from camera/player position
+    vec2 camera_xz = vec2(camera_pos.x, camera_pos.z);
+    float distance = length(world_xz - camera_xz);
+    v_fog = 1.0 - smoothstep(10000.0, 15000.0, distance); // Fog from 10km to 15km
+    
+    gl_Position = mvp * vec4(final_pos, 1.0);
 }"#;
 
 pub const VERTEX_INSTANCED_BULLET: &str = r#"#version 100
@@ -743,36 +827,50 @@ uniform vec3 color;
 varying vec3 v_barycentric;
 varying float v_height;
 varying float v_fog;
+varying vec3 v_normal;
 
 void main() {
-    // Height-based coloring
-    float height_factor = (v_height + 300.0) / 600.0;
-    height_factor = clamp(height_factor, 0.0, 1.0);
-    height_factor = 0.4 + height_factor * 0.6;
+    // Simple directional lighting
+    vec3 light_dir = normalize(vec3(0.3, 0.8, 0.5));
+    float ndotl = max(dot(v_normal, light_dir), 0.0);
+    float ambient = 0.3;
+    float lighting = ambient + (1.0 - ambient) * ndotl;
     
-    // Simple biome colors based on height
+    // Height-based coloring with better biome variety
     vec3 biome_color;
-    if (v_height < -50.0) {
-        biome_color = vec3(0.2, 0.3, 0.5); // Deep blue for low areas
+    if (v_height < -100.0) {
+        biome_color = vec3(0.1, 0.2, 0.4); // Deep water
+    } else if (v_height < -50.0) {
+        biome_color = vec3(0.2, 0.3, 0.5); // Shallow water
+    } else if (v_height < 0.0) {
+        biome_color = vec3(0.8, 0.7, 0.5); // Beach/sand
     } else if (v_height < 50.0) {
-        biome_color = vec3(0.3, 0.5, 0.2); // Green for plains
+        biome_color = vec3(0.3, 0.5, 0.2); // Grass
     } else if (v_height < 150.0) {
-        biome_color = vec3(0.4, 0.4, 0.3); // Brown for hills
+        biome_color = vec3(0.4, 0.4, 0.3); // Rocky terrain
     } else if (v_height < 250.0) {
-        biome_color = vec3(0.5, 0.4, 0.3); // Rocky brown
+        biome_color = vec3(0.5, 0.4, 0.3); // Mountains
     } else {
-        biome_color = vec3(0.8, 0.8, 0.8); // Snow white for peaks
+        biome_color = vec3(0.9, 0.9, 0.9); // Snow caps
     }
     
-    vec3 final_color = biome_color * height_factor;
+    // Apply lighting
+    vec3 lit_color = biome_color * lighting;
     
-    // Apply fog - lighter fog color for better visibility
-    final_color = mix(vec3(0.2, 0.2, 0.25), final_color, v_fog);
+    // Add some slope-based shading
+    float slope = 1.0 - v_normal.y;
+    if (slope > 0.7) {
+        lit_color *= 0.8; // Darken steep slopes
+    }
     
-    // Wireframe effect
+    // Apply fog
+    vec3 fog_color = vec3(0.6, 0.7, 0.8);
+    vec3 final_color = mix(fog_color, lit_color, v_fog);
+    
+    // Subtle wireframe effect
     float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
-    if (minBary < 0.02) {
-        final_color *= 1.2; // Brighter edges
+    if (minBary < 0.01) {
+        final_color *= 1.1;
     }
     
     gl_FragColor = vec4(final_color, 1.0);
@@ -807,6 +905,10 @@ pub fn meta() -> ShaderMeta {
             uniforms: vec![
                 UniformDesc::new("mvp", UniformType::Mat4),
                 UniformDesc::new("color", UniformType::Float3),
+                UniformDesc::new("morph_factor", UniformType::Float1),
+                UniformDesc::new("chunk_offset", UniformType::Float2),
+                UniformDesc::new("lod_scale", UniformType::Float1),
+                UniformDesc::new("camera_pos", UniformType::Float3),
             ],
         },
     }
@@ -839,6 +941,33 @@ impl Uniforms {
             mvp: mvp.to_cols_array_2d(),
             color,
             _padding: 0.0,
+        }
+    }
+}
+
+#[repr(C)]
+pub struct UniformsTerrainGPU {
+    pub mvp: [[f32; 4]; 4],
+    pub color: [f32; 3],
+    pub morph_factor: f32,
+    pub chunk_offset: [f32; 2],
+    pub lod_scale: f32,
+    pub _padding: f32,
+    pub camera_pos: [f32; 3],
+    pub _padding2: f32,
+}
+
+impl UniformsTerrainGPU {
+    pub fn new(mvp: Mat4, color: [f32; 3], morph_factor: f32, chunk_offset: [f32; 2], lod_scale: f32, camera_pos: Vec3) -> Self {
+        Self {
+            mvp: mvp.to_cols_array_2d(),
+            color,
+            morph_factor,
+            chunk_offset,
+            lod_scale,
+            _padding: 0.0,
+            camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z],
+            _padding2: 0.0,
         }
     }
 }

@@ -17,9 +17,9 @@ impl LodLevel {
     }
     
     pub fn from_distance(distance: f32) -> Self {
-        if distance < 800.0 {
+        if distance < 400.0 {          // Much smaller high detail area
             LodLevel::High
-        } else if distance < 1600.0 {
+        } else if distance < 1200.0 {   // Reduced medium area
             LodLevel::Medium
         } else {
             LodLevel::Low
@@ -49,51 +49,25 @@ impl TerrainChunk {
     }
     
     pub fn generate_vertices(&mut self, chunk_size: f32) {
-        let start_time = miniquad::date::now();
-        
         let grid_size = self.lod.grid_size();
         let cell_size = chunk_size / grid_size as f32;
-        
-        let base_x = self.chunk_x as f32 * chunk_size;
-        let base_z = self.chunk_z as f32 * chunk_size;
         
         // Generate vertices
         self.vertices.clear();
         self.indices.clear();
         
-        // Create main grid vertices
+        // Create grid vertices - just positions, GPU will calculate heights
         for z in 0..=grid_size {
             for x in 0..=grid_size {
-                // Calculate exact world position with proper edge alignment
-                let world_x = if x == grid_size {
-                    // Right edge - align exactly with next chunk's left edge
-                    (self.chunk_x + 1) as f32 * chunk_size
-                } else if x == 0 {
-                    // Left edge - align exactly with chunk boundary
-                    self.chunk_x as f32 * chunk_size
-                } else {
-                    // Interior vertices
-                    base_x + (x as f32 * cell_size)
-                };
+                // Local position within chunk (0 to chunk_size)
+                let local_x = x as f32 * cell_size;
+                let local_z = z as f32 * cell_size;
                 
-                let world_z = if z == grid_size {
-                    // Far edge - align exactly with next chunk's near edge
-                    (self.chunk_z + 1) as f32 * chunk_size
-                } else if z == 0 {
-                    // Near edge - align exactly with chunk boundary
-                    self.chunk_z as f32 * chunk_size
-                } else {
-                    // Interior vertices
-                    base_z + (z as f32 * cell_size)
-                };
-                
-                // Calculate height using our terrain generation function
-                let height = crate::terrain_generation::height_at(world_x, world_z);
-                
+                // Store local position, GPU will add chunk offset
                 self.vertices.push(Vertex::new(
-                    world_x,
-                    height,
-                    world_z,
+                    local_x,
+                    0.0,  // Height will be calculated on GPU
+                    local_z,
                 ));
             }
         }
@@ -117,11 +91,8 @@ impl TerrainChunk {
             }
         }
         
-        let gen_time = miniquad::date::now() - start_time;
-        if gen_time > 0.01 { // Only log very slow chunk generations (> 10ms)
-            println!("WARNING: Slow chunk ({},{}) generation: {:.1}ms", 
-                self.chunk_x, self.chunk_z, gen_time * 1000.0);
-        }
+        
+        // Remove per-chunk logging to reduce console spam
     }
     
     pub fn update_lod(&mut self, new_lod: LodLevel, chunk_size: f32) {
