@@ -1184,6 +1184,7 @@ dependencies = [
  "clap",
  "glam",
  "image",
+ "lazy_static",
  "miniquad",
  "rand",
  "rodio",

@@ -5,9 +5,9 @@ use crate::player::Player;
 use crate::enemy::{Enemy, EnemyType};
 use crate::mine::Mine;
 
-// Use the same terrain height calculation as the Terrain module for consistency
+// Use the terrain height calculation from the terrain generation module
 fn terrain_height_at(x: f32, z: f32) -> f32 {
-    crate::terrain::Terrain::height_at(x, z)
+    crate::terrain_generation::height_at(x, z)
 }
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::{Particle, ParticleType};

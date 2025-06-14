@@ -14,6 +14,30 @@ void main() {
     gl_Position = mvp * vec4(pos, 1.0);
 }"#;
 
+pub const VERTEX_TERRAIN_SIMPLE: &str = r#"#version 100
+attribute vec3 pos;
+attribute vec3 barycentric;
+
+uniform mat4 mvp;
+
+varying vec3 v_barycentric;
+varying float v_height;
+varying float v_fog;
+
+void main() {
+    v_barycentric = barycentric;
+    v_height = pos.y;
+    
+    vec4 world_pos = mvp * vec4(pos, 1.0);
+    
+    // Calculate fog based on distance from camera
+    float distance = length(world_pos.xyz);
+    // Much reduced fog - starts very far out
+    v_fog = 1.0 - smoothstep(20000.0, 40000.0, distance);
+    
+    gl_Position = world_pos;
+}"#;
+
 pub const VERTEX_INSTANCED_BULLET: &str = r#"#version 100
 attribute vec3 pos;
 attribute vec3 barycentric;
@@ -40,6 +64,7 @@ attribute vec2 instance_offset;
 varying vec3 v_barycentric;
 varying float v_height;
 varying vec2 v_world_xz;
+varying float v_ao; // Ambient occlusion factor
 
 uniform mat4 mvp;
 uniform float terrain_scale;
@@ -616,9 +641,10 @@ void main() {
     // Pass height to fragment shader
     v_height = world_pos.y;
     
-    // Debug: visualize UV coordinates as height to check if they're correct
-    // world_pos.y = uv.x * 100.0 - 50.0;  // Uncomment to debug UV.x
-    // world_pos.y = uv.y * 100.0 - 50.0;  // Uncomment to debug UV.y
+    // Simple height-based ambient occlusion approximation
+    // Lower areas are darker (valleys), higher areas are brighter (peaks)
+    float height_normalized = (world_pos.y + 300.0) / 600.0; // Normalize to 0-1 range
+    v_ao = 0.5 + height_normalized * 0.5; // Range from 0.5 to 1.0
     
     gl_Position = mvp * vec4(world_pos, 1.0);
 }"#;
@@ -634,6 +660,7 @@ uniform float terrain_scale;
 varying vec3 v_barycentric;
 varying float v_height;
 varying vec2 v_world_xz;
+varying float v_ao;
 
 void main() {
     // Sample biome color from texture
@@ -650,9 +677,18 @@ void main() {
     height_factor = clamp(height_factor, 0.0, 1.0);
     height_factor = 0.3 + height_factor * 0.7; // Map to 0.3-1.0 range for more contrast
     
+    // Apply ambient occlusion for valley shadows
+    float shadow_factor = mix(0.4, 1.0, v_ao); // AO ranges from 0.4 (darkest) to 1.0 (no shadow)
+    
+    // Add a subtle directional light effect (simulating sun from northwest)
+    vec2 gradient_dir = vec2(1.0, 1.0); // Northwest light direction (not normalized)
+    // Use world coordinates directly without normalizing to avoid quadrant artifacts
+    float gradient = dot(v_world_xz * 0.00001, gradient_dir) + 0.9; // Very subtle gradient across the world
+    gradient = clamp(gradient, 0.8, 1.0); // Keep it subtle - 80% to 100% brightness
+    
     // Blend base color with biome color
     vec3 blended_color = mix(color, biome_color, 0.7); // 70% biome color, 30% base color
-    vec3 adjusted_color = blended_color * height_factor;
+    vec3 adjusted_color = blended_color * height_factor * shadow_factor * gradient;
     
     // DEBUG: Visualize the height texture in red channel
     // adjusted_color.r = debug_height;
@@ -697,6 +733,49 @@ void main() {
             gl_FragColor = vec4(color, 1.0); // Bright version for edges
         }
     }
+}"#;
+
+pub const FRAGMENT_TERRAIN_SIMPLE: &str = r#"#version 100
+precision mediump float;
+
+uniform vec3 color;
+
+varying vec3 v_barycentric;
+varying float v_height;
+varying float v_fog;
+
+void main() {
+    // Height-based coloring
+    float height_factor = (v_height + 300.0) / 600.0;
+    height_factor = clamp(height_factor, 0.0, 1.0);
+    height_factor = 0.4 + height_factor * 0.6;
+    
+    // Simple biome colors based on height
+    vec3 biome_color;
+    if (v_height < -50.0) {
+        biome_color = vec3(0.2, 0.3, 0.5); // Deep blue for low areas
+    } else if (v_height < 50.0) {
+        biome_color = vec3(0.3, 0.5, 0.2); // Green for plains
+    } else if (v_height < 150.0) {
+        biome_color = vec3(0.4, 0.4, 0.3); // Brown for hills
+    } else if (v_height < 250.0) {
+        biome_color = vec3(0.5, 0.4, 0.3); // Rocky brown
+    } else {
+        biome_color = vec3(0.8, 0.8, 0.8); // Snow white for peaks
+    }
+    
+    vec3 final_color = biome_color * height_factor;
+    
+    // Apply fog - lighter fog color for better visibility
+    final_color = mix(vec3(0.2, 0.2, 0.25), final_color, v_fog);
+    
+    // Wireframe effect
+    float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
+    if (minBary < 0.02) {
+        final_color *= 1.2; // Brighter edges
+    }
+    
+    gl_FragColor = vec4(final_color, 1.0);
 }"#;
 
 pub const FRAGMENT_GLOW: &str = r#"#version 100

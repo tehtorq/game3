@@ -1,7 +1,7 @@
 use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
-use crate::terrain::Terrain;
+use crate::terrain_generation;
 
 #[derive(Clone)]
 pub struct Player {
@@ -130,11 +130,11 @@ impl Player {
         const MAX_TURN_SPEED: f32 = 4.0;    // Slightly faster max turn rate
         
         const THRUST_POWER: f32 = 800.0;    // Forward thrust power
-        const STRAFE_POWER: f32 = 600.0;    // Lateral thrust power
+        const STRAFE_POWER: f32 = 450.0;    // Lateral thrust power (reduced to 75% of 600)
         const BOOST_MULTIPLIER: f32 = 2.5;  // Speed boost when holding shift
         
-        const AIR_DRAG: f32 = 2.5;          // Higher drag for hover behavior
-        const HOVER_DRAG: f32 = 6.0;        // Extra drag when not thrusting
+        const AIR_DRAG: f32 = 1.0;          // Much lower drag for more momentum
+        const HOVER_DRAG: f32 = 1.5;        // Very low drag when not thrusting for long coasting
         const GRAVITY: f32 = 80.0;          // Slightly stronger gravity
         const MAX_SPEED: f32 = 800.0;       // Increased to outrun aggressive enemies
         const MAX_VERTICAL_SPEED: f32 = 300.0;  // Reduced to match
@@ -175,44 +175,78 @@ impl Player {
         // Reset thrust
         self.thrust = Vec3::ZERO;
         
-        // Apply forward/backward thrust
-        let mut forward_thrust = 0.0;
+        // Build thrust components
+        let mut forward_component = 0.0;
+        let mut strafe_component = 0.0;
+        let mut vertical_component = 0.0;
+        
+        // Forward/backward thrust
         if forward {
-            forward_thrust += THRUST_POWER;
+            forward_component += 1.0;
         }
         if backward {
-            forward_thrust -= THRUST_POWER * 0.7; // Slightly slower backwards
+            forward_component -= 0.7; // Slightly slower backwards
         }
         
-        // Apply boost multiplier
-        if boost && forward_thrust > 0.0 {
-            forward_thrust *= BOOST_MULTIPLIER;
-        }
-        
-        self.thrust += forward_dir * forward_thrust;
-        
-        // Apply strafe thrust
+        // Strafe thrust
         if left {
-            self.thrust += right_dir * STRAFE_POWER;
+            strafe_component += 1.0;
         }
         if right {
-            self.thrust -= right_dir * STRAFE_POWER;
+            strafe_component -= 1.0;
         }
         
-        // Apply vertical thrust
+        // Vertical thrust
         if up {
-            self.thrust.y += THRUST_POWER; // Go up
+            vertical_component += 1.0;
         }
         if down {
-            self.thrust.y -= THRUST_POWER; // Go down
+            vertical_component -= 1.0;
         }
+        
+        // Build horizontal thrust vector and normalize if needed
+        let mut horizontal_thrust = forward_dir * forward_component + right_dir * strafe_component;
+        let horizontal_length = horizontal_thrust.length();
+        
+        if horizontal_length > 1.0 {
+            // Normalize to prevent diagonal speed boost
+            horizontal_thrust /= horizontal_length;
+        }
+        
+        // Apply appropriate power based on movement type
+        let thrust_power = if forward_component.abs() > 0.0 {
+            THRUST_POWER
+        } else {
+            STRAFE_POWER
+        };
+        
+        // Apply boost multiplier only to forward movement
+        let final_thrust_power = if boost && forward_component > 0.0 {
+            thrust_power * BOOST_MULTIPLIER
+        } else {
+            thrust_power
+        };
+        
+        // Build final thrust vector
+        self.thrust = horizontal_thrust * final_thrust_power + Vec3::new(0.0, vertical_component * THRUST_POWER, 0.0);
         
         // Apply thrust to velocity
         self.vel += self.thrust * dt;
         
         // Apply drag - more when not thrusting (hover behavior)
-        let drag = if self.thrust.length() < 0.1 { HOVER_DRAG } else { AIR_DRAG };
-        self.vel *= 1.0 - (drag * dt);
+        // Use a smoother transition between thrust and hover drag
+        let thrust_magnitude = self.thrust.length();
+        let drag = if thrust_magnitude < 0.1 { 
+            HOVER_DRAG 
+        } else {
+            // Blend between AIR_DRAG and HOVER_DRAG based on thrust amount
+            let blend = (thrust_magnitude / THRUST_POWER).min(1.0);
+            AIR_DRAG * blend + HOVER_DRAG * (1.0 - blend)
+        };
+        
+        // Apply drag with a more physics-based approach for smoother deceleration
+        let drag_factor = (-drag * dt).exp(); // Exponential decay feels more natural
+        self.vel *= drag_factor;
         
         // Apply gravity - DISABLED
         // self.vel.y -= GRAVITY * dt;
@@ -230,21 +264,22 @@ impl Player {
         self.pos += self.vel * dt;
         
         // Constrain player height based on terrain below
-        let terrain_below = Terrain::height_at(self.pos.x, self.pos.z);
+        let terrain_below = terrain_generation::height_at(self.pos.x, self.pos.z);
         let min_height = terrain_below + 10.0;
         
         if self.pos.y < min_height {
             self.pos.y = min_height;
             self.vel.y = self.vel.y.max(0.0); // Stop downward velocity
-            
-            // Ground effect - reduce drag and provide lift when close to terrain
-            let height_above_terrain = self.pos.y - terrain_below;
-            if height_above_terrain < 100.0 {
-                // Stronger ground effect that scales with proximity
-                let effect_strength = 1.0 - (height_above_terrain / 100.0);
-                self.vel *= 1.0 + (0.05 * effect_strength); // Up to 5% speed boost
-                self.vel.y += 20.0 * effect_strength * dt;  // Upward cushion effect
-            }
+        }
+        
+        // Ground effect - provide lift when close to terrain (but don't boost horizontal speed)
+        // This should be checked regardless of whether we hit the ground
+        let height_above_terrain = self.pos.y - terrain_below;
+        if height_above_terrain < 100.0 {
+            // Ground effect that scales with proximity
+            let effect_strength = 1.0 - (height_above_terrain / 100.0);
+            // Only provide vertical lift, don't boost horizontal speed
+            self.vel.y += 20.0 * effect_strength * dt;  // Upward cushion effect
         }
         
         // Max altitude (above sea level, not terrain)
@@ -276,7 +311,7 @@ impl Player {
     }
     
     pub fn get_terrain_height(&self) -> f32 {
-        Terrain::height_at(self.pos.x, self.pos.z)
+        terrain_generation::height_at(self.pos.x, self.pos.z)
     }
     
     pub fn get_height_above_terrain(&self) -> f32 {

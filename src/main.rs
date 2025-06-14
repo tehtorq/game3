@@ -1,13 +1,17 @@
 use miniquad::*;
 use glam::{Vec3, Mat4};
 use std::f32::consts::PI;
-use clap::{Parser, Subcommand};
 
 mod math;
 mod vertex;
 mod renderer;
 mod terrain;
 mod terrain_cache;
+mod terrain_chunk;
+mod terrain_generation;
+mod terrain_cpu;
+mod terrain_lod_blend;
+mod terrain_batch;
 mod biome;
 mod player;
 mod enemy;
@@ -32,39 +36,9 @@ use enemy::{EnemyType, AlertState};
 use hud::HUD;
 use camera::Camera;
 use game::Game;
-use terrain::Terrain;
-use terrain_cache::TerrainCache;
 use constants::*;
 use sounds::{SoundSystem, MusicState};
 
-#[derive(Parser)]
-#[command(name = "vector_shooter")]
-#[command(about = "A retro vector graphics space shooter", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Create a new terrain with the given name
-    Create { 
-        /// Name for the terrain
-        name: String,
-        /// Random seed (optional)
-        #[arg(short, long)]
-        seed: Option<u32>,
-    },
-    /// Load an existing terrain
-    Load { 
-        /// Name of the terrain to load
-        name: String 
-    },
-    /// List all cached terrains
-    List,
-    /// Play with default terrain (no caching)
-    Play,
-}
 
 // Default screen dimensions are now dynamically calculated at 75% of monitor size
 
@@ -72,7 +46,6 @@ struct Stage {
     ctx: Box<dyn RenderingBackend>,
     line_pipeline: Pipeline,
     triangle_pipeline: Pipeline,
-    terrain_pipeline: Pipeline,
     bullet_pipeline: Pipeline,
     bullet_glow_pipeline: Pipeline,
     bindings: Bindings,
@@ -82,8 +55,8 @@ struct Stage {
     camera: Camera,
     input: InputState,
     paused: bool,
-    instanced_terrain: Option<Terrain>,
-    terrain_config: TerrainConfig,
+    terrain_cpu: terrain_cpu::TerrainCPU,
+    terrain_simple_pipeline: Pipeline,
     hud: HUD,
     // FPS tracking fields
     frame_count: u32,
@@ -99,19 +72,6 @@ struct Stage {
     bullet_instance_system: BulletInstancingSystem,
 }
 
-#[derive(Clone)]
-struct TerrainConfig {
-    mode: TerrainMode,
-    name: Option<String>,
-    seed: Option<u32>,
-}
-
-#[derive(Clone, PartialEq)]
-enum TerrainMode {
-    Create,
-    Load,
-    Default,
-}
 
 #[derive(Default)]
 struct InputState {
@@ -128,7 +88,7 @@ struct InputState {
 }
 
 impl Stage {
-    fn new(terrain_config: TerrainConfig) -> Self {
+    fn new() -> Self {
         let mut ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
         
         let shader = ctx.new_shader(
@@ -139,23 +99,14 @@ impl Stage {
             shader::meta()
         ).unwrap();
         
-        println!("Creating terrain shader...");
-        let terrain_shader = match ctx.new_shader(
+        // Create simple terrain shader for CPU-based chunks
+        let terrain_simple_shader = ctx.new_shader(
             ShaderSource::Glsl {
-                vertex: shader::VERTEX_INSTANCED_TERRAIN,
-                fragment: shader::FRAGMENT_TERRAIN,
+                vertex: shader::VERTEX_TERRAIN_SIMPLE,
+                fragment: shader::FRAGMENT_TERRAIN_SIMPLE,
             },
-            shader::meta_terrain()
-        ) {
-            Ok(shader) => {
-                println!("Terrain shader created successfully");
-                shader
-            }
-            Err(e) => {
-                eprintln!("Failed to create terrain shader: {:?}", e);
-                panic!("Shader compilation failed");
-            }
-        };
+            shader::meta()
+        ).expect("Failed to create simple terrain shader");
         
         let line_pipeline = ctx.new_pipeline(
             &[BufferLayout {
@@ -196,31 +147,23 @@ impl Stage {
             },
         );
         
-        // Create terrain pipeline with instancing
-        let terrain_pipeline = ctx.new_pipeline(
-            &[
-                BufferLayout {
-                    step_func: VertexStep::PerVertex,
-                    stride: 24, // 6 floats * 4 bytes
-                    ..Default::default()
-                },
-                BufferLayout {
-                    step_func: VertexStep::PerInstance,
-                    stride: 8, // 2 floats * 4 bytes for instance offset
-                    ..Default::default()
-                }
-            ],
+        // Create simple terrain pipeline for CPU chunks
+        let terrain_simple_pipeline = ctx.new_pipeline(
+            &[BufferLayout {
+                step_func: VertexStep::PerVertex,
+                stride: 24, // 6 floats * 4 bytes
+                ..Default::default()
+            }],
             &[
                 VertexAttribute::new("pos", VertexFormat::Float3),
                 VertexAttribute::new("barycentric", VertexFormat::Float3),
-                VertexAttribute::with_buffer("instance_offset", VertexFormat::Float2, 1),
             ],
-            terrain_shader,
+            terrain_simple_shader,
             PipelineParams {
                 primitive_type: PrimitiveType::Triangles,
                 depth_test: Comparison::LessOrEqual,
                 depth_write: true,
-                cull_face: CullFace::Nothing, // Disable culling for debugging
+                cull_face: CullFace::Nothing,
                 ..Default::default()
             },
         );
@@ -351,11 +294,17 @@ impl Stage {
             images: vec![],
         };
 
+        // Create CPU-based terrain system
+        let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
+        let terrain_cpu = unsafe {
+            terrain_cpu::TerrainCPU::new(&mut *ctx_ptr, 15) // 15 chunks = 2400 unit view distance
+        };
+        
         let stage = Self {
             ctx,
             line_pipeline,
             triangle_pipeline,
-            terrain_pipeline,
+            terrain_simple_pipeline,
             bullet_pipeline,
             bullet_glow_pipeline,
             bindings,
@@ -365,8 +314,7 @@ impl Stage {
             camera: Camera::new(),
             input: InputState::default(),
             paused: false,
-            instanced_terrain: None,
-            terrain_config,
+            terrain_cpu,
             hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
@@ -479,54 +427,10 @@ impl EventHandler for Stage {
             self.fps_timer = 0.0;
         }
         
-        // Initialize instanced terrain on first draw
-        if self.instanced_terrain.is_none() {
-            println!("Initializing instanced terrain...");
-            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-            unsafe {
-                let terrain = match self.terrain_config.mode {
-                    TerrainMode::Load => {
-                        if let Some(ref name) = self.terrain_config.name {
-                            match TerrainCache::load_terrain_textures(name) {
-                                Ok((height_data, biome_data, size)) => {
-                                    Terrain::new_from_cache(&mut *ctx_ptr, VIEW_DISTANCE, height_data, biome_data, size)
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to load terrain '{}': {}", name, e);
-                                    eprintln!("Falling back to default terrain");
-                                    Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
-                                }
-                            }
-                        } else {
-                            Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
-                        }
-                    }
-                    TerrainMode::Create => {
-                        let seed = self.terrain_config.seed.unwrap_or(rand::random());
-                        println!("Creating terrain with seed: {}", seed);
-                        Terrain::new_with_seed_and_save(
-                            &mut *ctx_ptr, 
-                            VIEW_DISTANCE, 
-                            seed,
-                            self.terrain_config.name.as_deref()
-                        )
-                    }
-                    TerrainMode::Default => {
-                        Terrain::new(&mut *ctx_ptr, VIEW_DISTANCE)
-                    }
-                };
-                
-                // Create terrain bindings
-                self.terrain_bindings = Bindings {
-                    vertex_buffers: vec![terrain.base_vertex_buffer(), terrain.instance_buffer()],
-                    index_buffer: terrain.index_buffer(),
-                    images: vec![terrain.height_texture(), terrain.biome_texture()],
-                };
-                
-                println!("Terrain bindings created with {} vertex buffers", self.terrain_bindings.vertex_buffers.len());
-                
-                self.instanced_terrain = Some(terrain);
-            }
+        // Update terrain chunks based on player position
+        let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+        unsafe {
+            self.terrain_cpu.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
         }
         
         // Set up view and projection matrices
@@ -543,26 +447,10 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
-        // Draw instanced terrain
-        if let Some(terrain) = &mut self.instanced_terrain {
-            // Update terrain chunks to be centered around player
-            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-            unsafe {
-                terrain.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
-            }
-            
-            // Drawing terrain
-            self.ctx.apply_pipeline(&self.terrain_pipeline);
-            self.ctx.apply_bindings(&self.terrain_bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::UniformsTerrain::new(
-                mvp, 
-                [0.0, 1.0, 0.0], // Green
-                terrain.terrain_scale(),
-                0.0 // terrain_y_base - start at Y=0
-            )));
-            
-            // Draw all terrain instances
-            self.ctx.draw(0, terrain.index_count(), terrain.instance_count());
+        // Draw CPU-based terrain chunks
+        let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+        unsafe {
+            self.terrain_cpu.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp.to_cols_array_2d(), [0.0, 1.0, 0.0]);
         }
         
         // Draw bases first (in red/orange)
@@ -1328,58 +1216,8 @@ fn main() {
         eprintln!("==================\n");
     }));
     
-    // Parse command line arguments
-    let cli = Cli::parse();
-    
-    let terrain_config = match cli.command {
-        Some(Commands::List) => {
-            println!("Cached terrains:");
-            let terrains = TerrainCache::list_cached_terrains();
-            if terrains.is_empty() {
-                println!("  No cached terrains found");
-            } else {
-                for terrain in terrains {
-                    println!("  - {}", terrain);
-                }
-            }
-            return;
-        }
-        Some(Commands::Create { name, seed }) => {
-            println!("Creating new terrain '{}'", name);
-            if TerrainCache::exists(&name) {
-                eprintln!("Warning: Terrain '{}' already exists and will be overwritten", name);
-            }
-            TerrainConfig {
-                mode: TerrainMode::Create,
-                name: Some(name),
-                seed,
-            }
-        }
-        Some(Commands::Load { name }) => {
-            if !TerrainCache::exists(&name) {
-                eprintln!("Error: Terrain '{}' not found", name);
-                eprintln!("Available terrains:");
-                for terrain in TerrainCache::list_cached_terrains() {
-                    eprintln!("  - {}", terrain);
-                }
-                return;
-            }
-            println!("Loading terrain '{}'", name);
-            TerrainConfig {
-                mode: TerrainMode::Load,
-                name: Some(name),
-                seed: None,
-            }
-        }
-        Some(Commands::Play) | None => {
-            println!("Playing with default terrain (no caching)");
-            TerrainConfig {
-                mode: TerrainMode::Default,
-                name: None,
-                seed: None,
-            }
-        }
-    };
+    // Note: Command line arguments for terrain loading are temporarily disabled
+    // The new CPU-based terrain system generates terrain on-the-fly
     
     // Default window size
     let window_width = WINDOW_WIDTH;
@@ -1392,6 +1230,6 @@ fn main() {
             window_height,
             ..Default::default()
         },
-        move || Box::new(Stage::new(terrain_config)),
+        || Box::new(Stage::new()),
     );
 }
