@@ -78,4 +78,15 @@ impl Camera {
         // Use left-handed projection (this worked)
         Mat4::perspective_lh(CAMERA_FOV.to_radians(), aspect, CAMERA_NEAR, CAMERA_FAR)
     }
+    
+    pub fn get_position(&self) -> Vec3 {
+        // Calculate camera position using smoothed values
+        let camera_offset = Vec3::new(
+            self.smooth_rotation.sin() * self.distance,
+            self.height,
+            self.smooth_rotation.cos() * self.distance
+        );
+        
+        self.smooth_pos + camera_offset
+    }
 }

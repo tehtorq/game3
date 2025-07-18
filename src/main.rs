@@ -9,7 +9,6 @@ mod terrain;
 mod terrain_cache;
 mod terrain_chunk;
 mod terrain_generation;
-mod terrain_cpu;
 mod terrain_lod_blend;
 mod terrain_batch;
 mod terrain_gpu_batch;
@@ -17,6 +16,7 @@ mod terrain_predictive;
 mod terrain_clipmap;
 mod terrain_gpu_rings;
 mod terrain_gpu_grid;
+mod terrain_gpu_complete;
 mod biome;
 mod player;
 mod enemy;
@@ -29,6 +29,7 @@ mod hud;
 mod base;
 mod camera;
 mod shader;
+mod shader_volumetric_laser;
 mod game;
 mod constants;
 mod sounds;
@@ -49,8 +50,8 @@ use sounds::{SoundSystem, MusicState};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TerrainMode {
-    ChunkBased,  // Current implementation
     GPUGrid,     // Simple grid-based GPU terrain
+    GPUComplete, // Complete GPU terrain with textures
 }
 
 struct Stage {
@@ -59,6 +60,7 @@ struct Stage {
     triangle_pipeline: Pipeline,
     bullet_pipeline: Pipeline,
     bullet_glow_pipeline: Pipeline,
+    volumetric_laser_pipeline: Pipeline,
     bindings: Bindings,
     terrain_bindings: Bindings,
     bullet_bindings: Bindings,
@@ -66,9 +68,9 @@ struct Stage {
     camera: Camera,
     input: InputState,
     paused: bool,
-    terrain_cpu: terrain_cpu::TerrainCPU,
     terrain_gpu_rings: Option<terrain_gpu_rings::TerrainGPURings>,
     terrain_gpu_grid: Option<terrain_gpu_grid::TerrainGPUGrid>,
+    terrain_gpu_complete: Option<terrain_gpu_complete::TerrainGPUComplete>,
     terrain_mode: TerrainMode,
     terrain_simple_pipeline: Pipeline,
     hud: HUD,
@@ -114,13 +116,20 @@ impl Stage {
         ).unwrap();
         
         // Create simple terrain shader for CPU-based chunks
-        let terrain_simple_shader = ctx.new_shader(
+        let terrain_simple_shader = match ctx.new_shader(
             ShaderSource::Glsl {
                 vertex: shader::VERTEX_TERRAIN_SIMPLE,
                 fragment: shader::FRAGMENT_TERRAIN_SIMPLE,
             },
-            shader::meta()
-        ).expect("Failed to create simple terrain shader");
+            shader::meta_terrain_simple()
+        ) {
+            Ok(shader) => shader,
+            Err(e) => {
+                eprintln!("Failed to create terrain shader: {:?}", e);
+                eprintln!("This usually means there's a mismatch between shader code and uniforms.");
+                panic!("Shader compilation failed");
+            }
+        };
         
         let line_pipeline = ctx.new_pipeline(
             &[BufferLayout {
@@ -229,6 +238,40 @@ impl Stage {
             shader::meta()
         ).expect("Failed to create bullet glow shader");
         
+        // Create volumetric laser shader and pipeline
+        let volumetric_laser_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: shader_volumetric_laser::VERTEX_VOLUMETRIC_LASER,
+                fragment: shader_volumetric_laser::FRAGMENT_VOLUMETRIC_LASER,
+            },
+            shader::meta_volumetric_laser()
+        ).expect("Failed to create volumetric laser shader");
+        
+        let volumetric_laser_pipeline = ctx.new_pipeline(
+            &[BufferLayout {
+                step_func: VertexStep::PerVertex,
+                stride: 24, // 6 floats * 4 bytes
+                ..Default::default()
+            }],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+            ],
+            volumetric_laser_shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: false, // Don't write depth for volumetric effect
+                cull_face: CullFace::Nothing,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::Zero  // Alpha blending with source alpha
+                )),
+                ..Default::default()
+            },
+        );
+        
         let bullet_glow_pipeline = ctx.new_pipeline(
             &[
                 BufferLayout {
@@ -308,15 +351,22 @@ impl Stage {
             images: vec![],
         };
 
-        // Create CPU-based terrain system
+        // Create GPUComplete terrain on startup
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
-        let terrain_cpu = unsafe {
-            terrain_cpu::TerrainCPU::new(&mut *ctx_ptr, 60) // 60 chunks = 9600 unit view distance
+        let mut terrain_gpu_complete = unsafe {
+            terrain_gpu_complete::TerrainGPUComplete::new(&mut *ctx_ptr)
         };
         
-        // GPU terrain alternatives (created on demand)
+        // Load or generate textures for the complete terrain
+        let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
+        unsafe {
+            terrain_gpu_complete.load_or_generate_textures(&mut *ctx_ptr, Some("awesome_terrain"));
+        }
+        
+        // GPU terrain alternatives
         let terrain_gpu_rings = None;
         let terrain_gpu_grid = None;
+        let terrain_gpu_complete = Some(terrain_gpu_complete);
         
         let stage = Self {
             ctx,
@@ -325,6 +375,7 @@ impl Stage {
             terrain_simple_pipeline,
             bullet_pipeline,
             bullet_glow_pipeline,
+            volumetric_laser_pipeline,
             bindings,
             terrain_bindings,
             bullet_bindings,
@@ -332,10 +383,10 @@ impl Stage {
             camera: Camera::new(),
             input: InputState::default(),
             paused: false,
-            terrain_cpu,
             terrain_gpu_rings,
             terrain_gpu_grid,
-            terrain_mode: TerrainMode::ChunkBased,
+            terrain_gpu_complete,
+            terrain_mode: TerrainMode::GPUComplete,
             hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
@@ -351,6 +402,13 @@ impl Stage {
         window::set_window_size(screen_width as u32, screen_height as u32);
         window::set_fullscreen(true);
         window::show_mouse(false);
+        
+        println!("\n=== Terrain Rendering System ===");
+        println!("Press T to cycle through terrain modes:");
+        println!("  1. GPUComplete - Full GPU terrain with biomes");
+        println!("  2. GPUGrid - Simple GPU grid terrain");
+        println!("Current mode: GPUComplete");
+        println!("================================\n");
         
         stage
     }
@@ -446,21 +504,11 @@ impl EventHandler for Stage {
             let fps = self.frame_count as f64 / self.fps_timer;
             println!("FPS: {:.1}", fps);
             println!("Enemies: {}", self.game.enemies.len());
-            println!("Active terrain chunks: {}", self.terrain_cpu.active_chunks_count());
             self.frame_count = 0;
             self.fps_timer = 0.0;
         }
         
-        // Update terrain based on selected mode
-        match self.terrain_mode {
-            TerrainMode::ChunkBased => {
-                let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-                unsafe {
-                    self.terrain_cpu.update_for_player_position(&mut *ctx_ptr, self.game.player.pos.x, self.game.player.pos.z, self.game.player.rotation);
-                }
-            },
-            _ => {} // GPU terrain doesn't need position updates
-        }
+        // GPU terrain doesn't need position updates
         
         // Set up view and projection matrices
         let (width, height) = window::screen_size();
@@ -478,12 +526,6 @@ impl EventHandler for Stage {
         
         // Draw terrain based on selected mode
         let terrain_triangles = match self.terrain_mode {
-            TerrainMode::ChunkBased => {
-                let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-                unsafe {
-                    self.terrain_cpu.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp.to_cols_array_2d(), [0.0, 1.0, 0.0], self.game.player.pos)
-                }
-            },
             TerrainMode::GPUGrid => {
                 if let Some(ref grid) = self.terrain_gpu_grid {
                     let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
@@ -494,7 +536,16 @@ impl EventHandler for Stage {
                     0
                 }
             },
-            _ => 0,
+            TerrainMode::GPUComplete => {
+                if let Some(ref terrain) = self.terrain_gpu_complete {
+                    let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+                    unsafe {
+                        terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos)
+                    }
+                } else {
+                    0
+                }
+            },
         };
         
         // Log terrain performance periodically
@@ -911,99 +962,147 @@ impl EventHandler for Stage {
         }
         
         
-        // Draw laser beams in two passes - lines for core and triangles for glow
+        // Draw volumetric laser beams
         vertices.clear();
         indices.clear();
         
-        // First pass: Draw laser core as bright lines
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Lines);
-            
-            for enemy in &self.game.enemies {
-                if let Some((laser_start, laser_end)) = enemy.get_laser_info() {
-                    // Draw bright core line
-                    renderer.draw_line(laser_start, laser_end);
+        // Process each laser beam enemy
+        for enemy in &self.game.enemies {
+            if let Some((laser_start, laser_end)) = enemy.get_laser_info() {
+                vertices.clear();
+                indices.clear();
+                
+                {
+                    let mut renderer = Renderer::new(&mut vertices, &mut indices);
+                    renderer.set_mode(RenderMode::Triangles);
                     
-                    // Add some extra lines for thickness and 3D effect
+                    // Create a cylindrical volume around the laser beam
                     let laser_dir = (laser_end - laser_start).normalize();
+                    let laser_length = (laser_end - laser_start).length();
                     
-                    // Calculate perpendicular vectors for creating a 3D beam
-                    let up = Vec3::new(0.0, 1.0, 0.0);
-                    let laser_right = laser_dir.cross(up).normalize();
-                    let laser_up = laser_right.cross(laser_dir).normalize();
+                    // Find perpendicular vectors
+                    let up = if laser_dir.y.abs() > 0.9 {
+                        Vec3::new(1.0, 0.0, 0.0)
+                    } else {
+                        Vec3::new(0.0, 1.0, 0.0)
+                    };
+                    let right = laser_dir.cross(up).normalize();
+                    let up = right.cross(laser_dir).normalize();
                     
-                    // Draw multiple lines to create a cylindrical beam effect
-                    for i in 0..8 {
-                        let angle = i as f32 * std::f32::consts::PI * 2.0 / 8.0;
-                        let offset_x = angle.cos() * 8.0;
-                        let offset_y = angle.sin() * 8.0;
-                        let offset = laser_right * offset_x + laser_up * offset_y;
+                    // Create a cylinder mesh with more segments for smoother ray marching
+                    let segments = 24;
+                    let radius = 60.0; // Larger radius for volumetric effect
+                    
+                    // Create vertices for cylinder
+                    let mut cylinder_verts = Vec::new();
+                    
+                    // Start cap
+                    for i in 0..segments {
+                        let angle = i as f32 * PI * 2.0 / segments as f32;
+                        let x = angle.cos() * radius;
+                        let y = angle.sin() * radius;
+                        let offset = right * x + up * y;
+                        cylinder_verts.push(laser_start + offset);
+                    }
+                    
+                    // End cap
+                    for i in 0..segments {
+                        let angle = i as f32 * PI * 2.0 / segments as f32;
+                        let x = angle.cos() * radius;
+                        let y = angle.sin() * radius;
+                        let offset = right * x + up * y;
+                        cylinder_verts.push(laser_end + offset);
+                    }
+                    
+                    // Draw cylinder sides
+                    for i in 0..segments {
+                        let i1 = i;
+                        let i2 = (i + 1) % segments;
+                        let i3 = i + segments;
+                        let i4 = ((i + 1) % segments) + segments;
                         
-                        renderer.draw_line(
-                            laser_start + offset,
-                            laser_end + offset
+                        // First triangle
+                        renderer.draw_triangle(
+                            cylinder_verts[i1],
+                            cylinder_verts[i2],
+                            cylinder_verts[i3]
+                        );
+                        
+                        // Second triangle
+                        renderer.draw_triangle(
+                            cylinder_verts[i2],
+                            cylinder_verts[i4],
+                            cylinder_verts[i3]
                         );
                     }
                     
-                    // Add some intermediate points for a slight curve effect
-                    let mid_point = (laser_start + laser_end) * 0.5;
-                    renderer.draw_line(laser_start, mid_point);
-                    renderer.draw_line(mid_point, laser_end);
+                    // Draw caps
+                    let center_start = laser_start;
+                    let center_end = laser_end;
+                    
+                    for i in 0..segments {
+                        let i1 = i;
+                        let i2 = (i + 1) % segments;
+                        
+                        // Start cap
+                        renderer.draw_triangle(
+                            center_start,
+                            cylinder_verts[i1],
+                            cylinder_verts[i2]
+                        );
+                        
+                        // End cap
+                        renderer.draw_triangle(
+                            center_end,
+                            cylinder_verts[i2 + segments],
+                            cylinder_verts[i1 + segments]
+                        );
+                    }
+                }
+                
+                if !vertices.is_empty() {
+                    self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
+                    self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
+                    self.ctx.apply_pipeline(&self.volumetric_laser_pipeline);
+                    self.ctx.apply_bindings(&self.bindings);
+                    
+                    // Create uniforms for volumetric laser shader
+                    #[repr(C)]
+                    struct VolumetricLaserUniforms {
+                        mvp: [[f32; 4]; 4],
+                        color: [f32; 3],
+                        _padding1: f32,
+                        laser_start: [f32; 3],
+                        _padding2: f32,
+                        laser_end: [f32; 3],
+                        _padding3: f32,
+                        laser_radius: f32,
+                        time: f32,
+                        _padding4: [f32; 2],
+                        camera_pos: [f32; 3],
+                        _padding5: f32,
+                    }
+                    
+                    let time = self.game.enemy_spawn_timer as f32;
+                    let uniforms = VolumetricLaserUniforms {
+                        mvp: mvp.to_cols_array_2d(),
+                        color: [1.0, 1.0, 0.0], // Yellow laser
+                        _padding1: 0.0,
+                        laser_start: [laser_start.x, laser_start.y, laser_start.z],
+                        _padding2: 0.0,
+                        laser_end: [laser_end.x, laser_end.y, laser_end.z],
+                        _padding3: 0.0,
+                        laser_radius: 20.0,
+                        time,
+                        _padding4: [0.0, 0.0],
+                        camera_pos: [self.camera.get_position().x, self.camera.get_position().y, self.camera.get_position().z],
+                        _padding5: 0.0,
+                    };
+                    
+                    self.ctx.apply_uniforms(UniformsSource::table(&uniforms));
+                    self.ctx.draw(0, indices.len() as i32, 1);
                 }
             }
-        }
-        
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.line_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            // Bright yellow for laser core
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0])));
-            self.ctx.draw(0, indices.len() as i32, 1);
-        }
-        
-        // Second pass: Draw laser glow as triangles
-        vertices.clear();
-        indices.clear();
-        
-        {
-            let mut renderer = Renderer::new(&mut vertices, &mut indices);
-            renderer.set_mode(RenderMode::Triangles);
-            
-            for enemy in &self.game.enemies {
-                if let Some((laser_start, laser_end)) = enemy.get_laser_info() {
-                    let laser_dir = (laser_end - laser_start).normalize();
-                    let laser_right = Vec3::new(-laser_dir.z, 0.0, laser_dir.x).normalize();
-                    
-                    // Draw wide glow
-                    let width = 40.0;
-                    let right_offset = laser_right * width;
-                    
-                    renderer.draw_triangle(
-                        laser_start - right_offset,
-                        laser_start + right_offset,
-                        laser_end + right_offset
-                    );
-                    
-                    renderer.draw_triangle(
-                        laser_start - right_offset,
-                        laser_end + right_offset,
-                        laser_end - right_offset
-                    );
-                }
-            }
-        }
-        
-        if !vertices.is_empty() {
-            self.ctx.buffer_update(self.bindings.vertex_buffers[0], BufferSource::slice(&vertices));
-            self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
-            self.ctx.apply_pipeline(&self.triangle_pipeline);
-            self.ctx.apply_bindings(&self.bindings);
-            // Translucent yellow-orange for glow
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.8, 0.2])));
-            self.ctx.draw(0, indices.len() as i32, 1);
         }
         
         // Draw mines in red
@@ -1208,7 +1307,7 @@ impl EventHandler for Stage {
             KeyCode::T => {
                 // Cycle through terrain modes
                 self.terrain_mode = match self.terrain_mode {
-                    TerrainMode::ChunkBased => {
+                    TerrainMode::GPUComplete => {
                         println!("Switching to GPU Grid terrain");
                         // Create GPU grid terrain if not exists
                         if self.terrain_gpu_grid.is_none() {
@@ -1220,8 +1319,8 @@ impl EventHandler for Stage {
                         TerrainMode::GPUGrid
                     },
                     TerrainMode::GPUGrid => {
-                        println!("Switching to Chunk-based terrain");
-                        TerrainMode::ChunkBased
+                        println!("Switching to GPU Complete terrain");
+                        TerrainMode::GPUComplete
                     },
                 };
             },

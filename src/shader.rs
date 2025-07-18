@@ -28,98 +28,238 @@ uniform vec3 camera_pos;     // Camera/player position for fog
 
 varying vec3 v_barycentric;
 varying float v_height;
-varying float v_fog;
 varying vec3 v_normal;
+varying vec3 v_world_pos;
+varying vec3 v_biome_color;
 
-// Fast GPU noise
-float hash(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.13);
-    p3 += dot(p3, p3.yzx + 3.333);
-    return fract((p3.x + p3.y) * p3.z);
+// Biome height generation functions (matching terrain.rs exactly)
+float plains_height(vec2 p) {
+    float scale1 = 0.002;
+    float scale2 = 0.007;
+    float scale3 = 0.015;
+    
+    float h1 = sin(p.x * scale1) * cos(p.y * scale1) * 40.0;
+    float h2 = sin(p.x * scale2 + 100.0) * sin(p.y * scale2 + 100.0) * 20.0;
+    float h3 = cos(p.x * scale3 + 200.0) * cos(p.y * scale3 + 200.0) * 10.0;
+    
+    float ridge = pow(abs(sin(p.x * 0.0005 + p.y * 0.0003)), 3.0) * 30.0;
+    float depression = smoothstep(0.6, 0.3, abs(sin(p.x * 0.0008) * cos(p.y * 0.0006))) * -20.0;
+    
+    return h1 + h2 + h3 + ridge + depression;
 }
 
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+float canyon_height(vec2 p) {
+    float scale1 = 0.0015;
+    float scale2 = 0.003;
+    float scale3 = 0.006;
+    float scale4 = 0.0005;
     
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
+    float river_flow = sin(p.x * scale1) * 0.7 + cos(p.y * scale1 * 0.8) * 0.5;
+    float river_meander = (sin(p.x * scale1 * 0.5 + p.y * scale1 * 0.3) + 
+                          cos(p.x * scale1 * 0.3 - p.y * scale1 * 0.4)) * 0.4;
     
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    float tributary1 = (sin(p.x * scale2 - p.y * scale2 * 0.6) + 
+                       cos(p.x * scale2 * 0.4 + p.y * scale2)) * 0.3;
+    float tributary2 = (sin(p.x * scale2 * 1.2 + p.y * scale2 * 0.5) * 
+                       cos(p.x * scale2 * 0.8 - p.y * scale2 * 0.7)) * 0.25;
+    
+    float confluence = (abs(tributary1 * river_flow) + abs(tributary2 * river_flow)) * 0.5;
+    
+    float width_pattern = sin(p.x * scale4 + p.y * scale4 * 0.7);
+    float canyon_width = 0.3 + abs(width_pattern) * 0.7 + confluence * 0.3;
+    
+    float pool_pattern = abs(sin(p.x * scale3) * cos(p.y * scale3 * 1.2));
+    float rapids = pow(abs(sin(p.x * scale3 * 2.0 + p.y * scale3 * 1.5)), 3.0) * 0.3;
+    
+    float river_depth = abs(river_flow + river_meander) * canyon_width + 
+                       abs(tributary1) * 0.5 + abs(tributary2) * 0.5 + 
+                       confluence + pool_pattern * 0.4 - rapids;
+    
+    float wall_slope = 1.5 + width_pattern * 0.5;
+    float canyon_cut = pow(abs(river_depth), wall_slope) * 2.0;
+    
+    float terraces = max(floor(canyon_cut * 6.0) / 6.0, 0.0);
+    float final_depth = canyon_cut * 0.4 + terraces * 0.6;
+    
+    float mesa_height = (pow(sin(p.x * scale4 * 0.5), 2.0) + pow(cos(p.y * scale4 * 0.5), 2.0)) * 40.0;
+    float plateau_base = 200.0;
+    
+    return plateau_base + mesa_height - final_depth * 160.0;
 }
 
-// Optimized GPU terrain generation 
-float terrain_height(vec2 p) {
-    float height = 0.0;
-    float amplitude = 100.0;
-    float frequency = 0.001;
+float mountain_height(vec2 p) {
+    float scale1 = 0.0008;
+    float scale2 = 0.0015;
+    float scale3 = 0.0003;
+    float scale4 = 0.004;
+    float scale5 = 0.0001;
     
-    // Reduce octaves for distant terrain based on morph_factor
-    int octaves = morph_factor > 0.5 ? 3 : 5;
+    float range_angle = 0.4;
+    float ridge_main = pow(sin(p.x * scale3 * cos(range_angle) + p.y * scale3 * sin(range_angle)) * 0.5 + 0.5, 3.0);
+    float ridge_secondary = pow(cos(p.x * scale3 * 1.2 - p.y * scale3 * 0.7) * 0.5 + 0.5, 2.5);
     
-    // Multiple octaves
-    for (int i = 0; i < octaves; i++) {
-        height += (noise(p * frequency) - 0.5) * amplitude;
+    float peak_spacing = 0.0012;
+    float peak_line1 = sqrt(pow(sin(p.x * peak_spacing * cos(range_angle) + p.y * peak_spacing * sin(range_angle)), 2.0) + 
+                           pow(cos(p.x * peak_spacing * sin(range_angle) - p.y * peak_spacing * cos(range_angle)), 2.0));
+    float peak_line2 = sqrt(pow(sin(p.x * peak_spacing * 1.3 + 100.0), 2.0) + 
+                           pow(cos(p.y * peak_spacing * 1.3 - 50.0), 2.0));
+    
+    float peak_sharpness = 2.5;
+    float h1 = pow(max(1.0 - peak_line1, 0.0), peak_sharpness) * 270.0;
+    float h2 = pow(max(1.0 - peak_line2, 0.0), peak_sharpness * 0.8) * 225.0;
+    
+    float ridge_height = ridge_main * 180.0 + ridge_secondary * 120.0;
+    
+    float valley_pattern = sin(p.x * scale2 + p.y * scale2 * 0.6) + 
+                          cos(p.x * scale2 * 0.8 - p.y * scale2 * 0.5);
+    float valley_depth = pow(abs(valley_pattern), 2.0) * -60.0;
+    
+    float cliff_pattern = abs(sin(p.x * scale4) * cos(p.y * scale4 * 1.2));
+    float cliffs = pow(cliff_pattern, 4.0) * 80.0;
+    
+    float glacial_valley = pow(abs(sin(p.x * scale2 * 0.5 + p.y * scale2 * 0.7)), 0.5) * -40.0;
+    float snow_cap = max(h1 + h2 + ridge_height, 225.0) * 0.2;
+    
+    float distance_to_ridge = min(abs(ridge_main - 0.5) + abs(ridge_secondary - 0.5), 1.0);
+    float foothill_height = pow(1.0 - distance_to_ridge, 0.5) * 60.0;
+    
+    float tectonic = (sin(p.x * scale5) + cos(p.y * scale5 * 0.8)) * 45.0;
+    
+    float height = ridge_height + h1 + h2 + valley_depth + cliffs + 
+                  glacial_valley + snow_cap + foothill_height + tectonic;
+                  
+    return clamp(height, -250.0, 450.0);
+}
+
+float desert_height(vec2 p) {
+    float scale1 = 0.005;
+    float scale2 = 0.01;
+    float scale3 = 0.03;
+    
+    float dunes = abs(sin(p.x * scale1) * cos(p.y * scale1 * 1.2)) * 80.0;
+    float secondary = cos(p.x * scale2 + 30.0) * sin(p.y * scale2 - 20.0) * 30.0;
+    float ripples = sin(p.x * scale3) * cos(p.y * scale3) * 10.0;
+    float rocks = pow(abs(sin(p.x * 0.002) * cos(p.y * 0.002)), 4.0) * 60.0;
+    float hollows = smoothstep(0.7, 0.5, abs(sin(p.x * 0.004 + p.y * 0.003))) * -30.0;
+    
+    return -20.0 + dunes + secondary + ripples + rocks + hollows;
+}
+
+// Get biome type and height
+float get_biome_height(vec2 p) {
+    float noise1 = sin(p.x * 0.0003) * cos(p.y * 0.0003);
+    float noise2 = sin(p.x * 0.0007 + 1.3) * sin(p.y * 0.0006 - 0.7);
+    float noise3 = cos(p.x * 0.0013 - 2.1) * sin(p.y * 0.0011 + 1.9);
+    
+    float biome_noise = noise1 * 0.5 + noise2 * 0.3 + noise3 * 0.2;
+    float local_var = sin(p.x * 0.01) * cos(p.y * 0.01) * 0.1;
+    biome_noise += local_var;
+    
+    // Simplified biome selection for shader
+    if (biome_noise < -0.3) {
+        return canyon_height(p);
+    } else if (biome_noise < 0.1) {
+        return plains_height(p);
+    } else if (biome_noise < 0.5) {
+        return desert_height(p);
+    } else {
+        return mountain_height(p);
+    }
+}
+
+// Get biome color
+vec3 get_biome_color(vec2 p, float height) {
+    float noise1 = sin(p.x * 0.0003) * cos(p.y * 0.0003);
+    float noise2 = sin(p.x * 0.0007 + 1.3) * sin(p.y * 0.0006 - 0.7);
+    float noise3 = cos(p.x * 0.0013 - 2.1) * sin(p.y * 0.0011 + 1.9);
+    
+    float biome_noise = noise1 * 0.5 + noise2 * 0.3 + noise3 * 0.2;
+    float local_var = sin(p.x * 0.01) * cos(p.y * 0.01) * 0.1;
+    biome_noise += local_var;
+    
+    vec3 color;
+    if (biome_noise < -0.3) {
+        // Canyon - red/orange rock
+        color = vec3(0.8, 0.5, 0.3);
+    } else if (biome_noise < 0.1) {
+        // Plains - green grass
+        color = vec3(0.4, 0.7, 0.3);
+    } else if (biome_noise < 0.5) {
+        // Desert - sandy yellow
+        color = vec3(0.9, 0.8, 0.5);
+    } else {
+        // Mountains - gray rock with snow
+        color = mix(vec3(0.5, 0.5, 0.6), vec3(0.9, 0.9, 1.0), smoothstep(200.0, 300.0, height));
+    }
+    
+    return color;
+}
+
+// Smooth blending between biomes
+float get_blended_biome_height(vec2 p) {
+    float sample_dist = 100.0;
+    float h_center = get_biome_height(p);
+    float h_north = get_biome_height(vec2(p.x, p.y + sample_dist));
+    float h_south = get_biome_height(vec2(p.x, p.y - sample_dist));
+    float h_east = get_biome_height(vec2(p.x + sample_dist, p.y));
+    float h_west = get_biome_height(vec2(p.x - sample_dist, p.y));
+    
+    float primary_height = (h_center * 3.0 + h_north + h_south + h_east + h_west) / 7.0;
+    
+    // Fractal noise
+    float fractal_noise = 0.0;
+    float amplitude = 60.0;
+    float frequency = 0.0005;
+    for (int i = 0; i < 5; i++) {
+        fractal_noise += sin(p.x * frequency) * cos(p.y * frequency) * amplitude;
+        fractal_noise += sin(p.x * frequency * 1.7 + 100.0) * cos(p.y * frequency * 1.7 + 100.0) * amplitude * 0.7;
         amplitude *= 0.45;
         frequency *= 2.3;
     }
     
-    // Large scale features - only for close terrain
-    if (morph_factor < 0.5) {
-        height += sin(p.x * 0.0001) * 120.0 * cos(p.y * 0.00008);
-        height += cos(p.y * 0.0001) * 120.0 * sin(p.x * 0.00012);
-    }
+    float continent_scale = 0.0001;
+    float continental = (sin(p.x * continent_scale) * cos(p.y * continent_scale * 0.8) + 
+                        cos(p.x * continent_scale * 0.3) * sin(p.y * continent_scale * 1.2)) * 120.0;
     
-    return height;
+    return primary_height + fractal_noise + continental;
 }
 
 void main() {
     v_barycentric = barycentric;
     
-    // Calculate world position - grid follows player
+    // Calculate world position
     vec2 world_xz = pos.xz + chunk_offset;
     
-    // Apply distance-based vertex culling for optimization
-    float dist_from_center = length(pos.xz);
-    float max_dist = 15000.0; // Cull vertices beyond 15km to see full 1024x1024 grid
+    // Get terrain height
+    float height = get_blended_biome_height(world_xz);
     
-    // Generate height on GPU
-    float height = terrain_height(world_xz);
-    
-    // Geomorphing for smooth LOD transitions
+    // Apply LOD morphing if needed
     float morph_height = height;
-    if (morph_factor > 0.001 && dist_from_center < max_dist) {
-        // Calculate grid-snapped position for next LOD
+    if (morph_factor > 0.001) {
         vec2 grid_size = vec2(lod_scale * 2.0);
         vec2 snapped_pos = floor(world_xz / grid_size + 0.5) * grid_size;
-        float snapped_height = terrain_height(snapped_pos);
-        
-        // Smooth blend between current and next LOD position
+        float snapped_height = get_blended_biome_height(snapped_pos);
         morph_height = mix(height, snapped_height, morph_factor);
         world_xz = mix(world_xz, snapped_pos, morph_factor);
     }
     
     v_height = morph_height;
-    vec3 final_pos = vec3(world_xz.x, morph_height, world_xz.y);
+    v_world_pos = vec3(world_xz.x, morph_height, world_xz.y);
     
-    // Calculate normal - use larger delta for distant terrain
-    float delta = mix(2.0, 8.0, morph_factor); // Larger delta for LOD terrain
-    float hL = terrain_height(world_xz - vec2(delta, 0.0));
-    float hR = terrain_height(world_xz + vec2(delta, 0.0));
-    float hD = terrain_height(world_xz - vec2(0.0, delta));
-    float hU = terrain_height(world_xz + vec2(0.0, delta));
+    // Calculate normal
+    float delta = mix(2.0, 8.0, morph_factor);
+    float hL = get_blended_biome_height(world_xz - vec2(delta, 0.0));
+    float hR = get_blended_biome_height(world_xz + vec2(delta, 0.0));
+    float hD = get_blended_biome_height(world_xz - vec2(0.0, delta));
+    float hU = get_blended_biome_height(world_xz + vec2(0.0, delta));
     
     v_normal = normalize(vec3(hL - hR, 2.0 * delta, hD - hU));
     
-    // Fog calculation - distance from camera/player position
-    vec2 camera_xz = vec2(camera_pos.x, camera_pos.z);
-    float distance = length(world_xz - camera_xz);
-    v_fog = 1.0 - smoothstep(10000.0, 15000.0, distance); // Fog from 10km to 15km
+    // Get biome color
+    v_biome_color = get_biome_color(world_xz, morph_height);
     
-    gl_Position = mvp * vec4(final_pos, 1.0);
+    
+    gl_Position = mvp * vec4(v_world_pos, 1.0);
 }"#;
 
 pub const VERTEX_INSTANCED_BULLET: &str = r#"#version 100
@@ -826,54 +966,62 @@ uniform vec3 color;
 
 varying vec3 v_barycentric;
 varying float v_height;
-varying float v_fog;
 varying vec3 v_normal;
+varying vec3 v_world_pos;
+varying vec3 v_biome_color;
 
 void main() {
-    // Simple directional lighting
-    vec3 light_dir = normalize(vec3(0.3, 0.8, 0.5));
-    float ndotl = max(dot(v_normal, light_dir), 0.0);
-    float ambient = 0.3;
-    float lighting = ambient + (1.0 - ambient) * ndotl;
+    // Use biome color as base
+    vec3 terrain_color = v_biome_color;
     
-    // Height-based coloring with better biome variety
-    vec3 biome_color;
-    if (v_height < -100.0) {
-        biome_color = vec3(0.1, 0.2, 0.4); // Deep water
-    } else if (v_height < -50.0) {
-        biome_color = vec3(0.2, 0.3, 0.5); // Shallow water
-    } else if (v_height < 0.0) {
-        biome_color = vec3(0.8, 0.7, 0.5); // Beach/sand
-    } else if (v_height < 50.0) {
-        biome_color = vec3(0.3, 0.5, 0.2); // Grass
-    } else if (v_height < 150.0) {
-        biome_color = vec3(0.4, 0.4, 0.3); // Rocky terrain
-    } else if (v_height < 250.0) {
-        biome_color = vec3(0.5, 0.4, 0.3); // Mountains
-    } else {
-        biome_color = vec3(0.9, 0.9, 0.9); // Snow caps
+    // Add height-based variation
+    float height_factor = smoothstep(-100.0, 400.0, v_height);
+    terrain_color = mix(terrain_color * 0.7, terrain_color * 1.1, height_factor);
+    
+    // Water coloring for low areas
+    if (v_height < -20.0) {
+        vec3 water_color = vec3(0.1, 0.3, 0.5);
+        float water_blend = smoothstep(0.0, -20.0, v_height);
+        terrain_color = mix(terrain_color, water_color, water_blend);
     }
     
-    // Apply lighting
-    vec3 lit_color = biome_color * lighting;
+    // Directional lighting with multiple light sources
+    vec3 sun_dir = normalize(vec3(0.5, 1.0, 0.3));
+    vec3 moon_dir = normalize(vec3(-0.3, 0.5, -0.7));
     
-    // Add some slope-based shading
-    float slope = 1.0 - v_normal.y;
-    if (slope > 0.7) {
-        lit_color *= 0.8; // Darken steep slopes
+    float sun_light = max(dot(v_normal, sun_dir), 0.0);
+    float moon_light = max(dot(v_normal, moon_dir), 0.0) * 0.3;
+    
+    // Combine lighting
+    float light = sun_light * 0.8 + moon_light + 0.3; // Sun + moon + ambient
+    
+    // Add some rim lighting for better depth perception
+    float rim = 1.0 - max(dot(v_normal, vec3(0.0, 1.0, 0.0)), 0.0);
+    rim = pow(rim, 2.0) * 0.2;
+    light += rim;
+    
+    terrain_color *= light;
+    
+    // Add subtle detail texture using world position
+    float detail = sin(v_world_pos.x * 0.1) * cos(v_world_pos.z * 0.1) * 0.05;
+    terrain_color += vec3(detail);
+    
+    // Wireframe effect on edges (optional, subtle)
+    float wire = min(v_barycentric.x, min(v_barycentric.y, v_barycentric.z));
+    float line_width = 0.015;
+    
+    if (wire < line_width) {
+        vec3 wire_color = terrain_color * 1.2 + vec3(0.1);
+        terrain_color = mix(wire_color, terrain_color, wire / line_width);
     }
     
-    // Apply fog
-    vec3 fog_color = vec3(0.6, 0.7, 0.8);
-    vec3 final_color = mix(fog_color, lit_color, v_fog);
+    // No fog applied - terrain always fully visible
     
-    // Subtle wireframe effect
-    float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
-    if (minBary < 0.01) {
-        final_color *= 1.1;
-    }
+    // Tone mapping for better color range
+    terrain_color = terrain_color / (terrain_color + vec3(1.0));
+    terrain_color = pow(terrain_color, vec3(1.0/2.2)); // Gamma correction
     
-    gl_FragColor = vec4(final_color, 1.0);
+    gl_FragColor = vec4(terrain_color, 1.0);
 }"#;
 
 pub const FRAGMENT_GLOW: &str = r#"#version 100
@@ -905,10 +1053,39 @@ pub fn meta() -> ShaderMeta {
             uniforms: vec![
                 UniformDesc::new("mvp", UniformType::Mat4),
                 UniformDesc::new("color", UniformType::Float3),
+            ],
+        },
+    }
+}
+
+pub fn meta_terrain_simple() -> ShaderMeta {
+    ShaderMeta {
+        images: vec![],
+        uniforms: UniformBlockLayout {
+            uniforms: vec![
+                UniformDesc::new("mvp", UniformType::Mat4),
+                UniformDesc::new("color", UniformType::Float3),
                 UniformDesc::new("morph_factor", UniformType::Float1),
                 UniformDesc::new("chunk_offset", UniformType::Float2),
                 UniformDesc::new("lod_scale", UniformType::Float1),
                 UniformDesc::new("camera_pos", UniformType::Float3),
+            ],
+        },
+    }
+}
+
+pub fn meta_volumetric_laser() -> ShaderMeta {
+    ShaderMeta {
+        images: vec![],
+        uniforms: UniformBlockLayout {
+            uniforms: vec![
+                UniformDesc::new("mvp", UniformType::Mat4),
+                UniformDesc::new("color", UniformType::Float3),
+                UniformDesc::new("laserStart", UniformType::Float3),
+                UniformDesc::new("laserEnd", UniformType::Float3),
+                UniformDesc::new("laserRadius", UniformType::Float1),
+                UniformDesc::new("time", UniformType::Float1),
+                UniformDesc::new("cameraPos", UniformType::Float3),
             ],
         },
     }
