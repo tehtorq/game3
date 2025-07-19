@@ -22,8 +22,8 @@ pub struct TerrainGPUComplete {
 impl TerrainGPUComplete {
     pub fn new(ctx: &mut dyn RenderingBackend) -> Self {
         // Create a large grid for GPU terrain
-        let grid_size = 512; // 512x512 grid for good detail/performance balance
-        let grid_spacing = 30.0; // 30 units between vertices (increased 25% from 24.0)
+        let grid_size = 1024; // 1024x1024 grid for larger visible area
+        let grid_spacing = 80.0; // 80 units between vertices for 81,920 unit total size
         
         let mut vertices = Vec::new();
         let mut indices = Vec::new();

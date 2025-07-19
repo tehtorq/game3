@@ -46,16 +46,21 @@ impl MeshBuilder {
         (vertices, indices)
     }
     
-    /// Create instance data (chunk positions)
+    /// Create instance data (chunk positions) in a circular pattern
     pub fn create_instance_data(view_distance: i32) -> Vec<f32> {
         let mut instance_data = Vec::new();
         let chunk_size = CHUNK_SIZE;
+        let max_distance_chunks = view_distance as f32 + 0.5;
         
         for z in -view_distance..=view_distance {
             for x in -view_distance..=view_distance {
-                // Chunk offset
-                instance_data.push(x as f32 * chunk_size);
-                instance_data.push(z as f32 * chunk_size);
+                // Check if chunk is within circular distance
+                let chunk_dist_sq = (x * x + z * z) as f32;
+                if chunk_dist_sq <= max_distance_chunks * max_distance_chunks {
+                    // Chunk offset
+                    instance_data.push(x as f32 * chunk_size);
+                    instance_data.push(z as f32 * chunk_size);
+                }
             }
         }
         
@@ -77,8 +82,17 @@ impl MeshBuilder {
         let half_fov = fov / 2.0;
         let forward_angle = player_rotation;
         
+        // Use circular distance for smoother terrain edge
+        let max_distance_chunks = view_distance as f32 + 0.5; // Add 0.5 for smoother edge
+        
         for z in -view_distance..=view_distance {
             for x in -view_distance..=view_distance {
+                // Check if chunk is within circular distance
+                let chunk_dist_sq = (x * x + z * z) as f32;
+                if chunk_dist_sq > max_distance_chunks * max_distance_chunks {
+                    continue; // Skip chunks outside the circle
+                }
+                
                 let chunk_x = player_chunk_x + x;
                 let chunk_z = player_chunk_z + z;
                 
@@ -89,15 +103,8 @@ impl MeshBuilder {
                 let to_chunk_x = chunk_center_x - player_x;
                 let to_chunk_z = chunk_center_z - player_z;
                 
-                // Distance check (circular view distance)
+                // Frustum check for chunks not directly near player
                 let distance_sq = to_chunk_x * to_chunk_x + to_chunk_z * to_chunk_z;
-                let max_distance = view_distance as f32 * chunk_size * 1.5;
-                
-                if distance_sq > max_distance * max_distance {
-                    continue;
-                }
-                
-                // Frustum check
                 if distance_sq > chunk_size * chunk_size {
                     let angle_to_chunk = to_chunk_z.atan2(to_chunk_x);
                     let angle_diff = (angle_to_chunk - forward_angle).rem_euclid(std::f32::consts::TAU);
@@ -107,7 +114,8 @@ impl MeshBuilder {
                         angle_diff 
                     };
                     
-                    if angle_diff.abs() > half_fov + 0.5 {
+                    // Wider field of view for circular terrain
+                    if angle_diff.abs() > half_fov + 0.7 {
                         continue;
                     }
                 }

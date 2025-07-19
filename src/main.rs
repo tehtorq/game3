@@ -179,6 +179,11 @@ impl Stage {
                 depth_test: Comparison::LessOrEqual,
                 depth_write: true,
                 cull_face: CullFace::Nothing,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha)
+                )),
                 ..Default::default()
             },
         );

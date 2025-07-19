@@ -31,6 +31,7 @@ varying float v_height;
 varying vec3 v_normal;
 varying vec3 v_world_pos;
 varying vec3 v_biome_color;
+varying vec2 v_local_pos;
 
 // Biome height generation functions (matching terrain.rs exactly)
 float plains_height(vec2 p) {
@@ -226,6 +227,9 @@ float get_blended_biome_height(vec2 p) {
 
 void main() {
     v_barycentric = barycentric;
+    
+    // Store local position for fade calculation
+    v_local_pos = pos.xz;
     
     // Calculate world position
     vec2 world_xz = pos.xz + chunk_offset;
@@ -963,16 +967,18 @@ void main() {
 }"#;
 
 pub const FRAGMENT_TERRAIN_SIMPLE: &str = r#"#version 100
-precision mediump float;
+precision highp float;
 
 uniform vec3 color;
 uniform float time;
+uniform vec3 camera_pos;
 
 varying vec3 v_barycentric;
 varying float v_height;
 varying vec3 v_normal;
 varying vec3 v_world_pos;
 varying vec3 v_biome_color;
+varying vec2 v_local_pos;
 
 void main() {
     // Use biome color as base
@@ -1086,13 +1092,28 @@ void main() {
         terrain_color = mix(wire_color, terrain_color, wire / line_width);
     }
     
-    // No fog applied - terrain always fully visible
+    // Circular fade-out effect
+    // Use the local position (which is relative to the terrain grid center)
+    // The terrain grid is always centered at the player, so local pos gives us
+    // the distance from the player/center correctly
+    float distance_from_center = length(v_local_pos);
+    float max_visible_distance = 40000.0; // Maximum visible distance (about half of terrain size)
+    float fade_start = max_visible_distance * 0.7; // Start fading at 70% of max distance
+    
+    // Create smooth fade-out
+    float fade_factor = 1.0 - smoothstep(fade_start, max_visible_distance, distance_from_center);
+    
+    // Apply fade to alpha channel for circular terrain effect
+    float alpha = fade_factor;
+    
+    // Also fade the color to black for better visual effect
+    terrain_color *= fade_factor;
     
     // Tone mapping for better color range
     terrain_color = terrain_color / (terrain_color + vec3(1.0));
     terrain_color = pow(terrain_color, vec3(1.0/2.2)); // Gamma correction
     
-    gl_FragColor = vec4(terrain_color, 1.0);
+    gl_FragColor = vec4(terrain_color, alpha);
 }"#;
 
 pub const FRAGMENT_GLOW: &str = r#"#version 100

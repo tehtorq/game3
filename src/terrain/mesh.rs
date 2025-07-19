@@ -293,17 +293,22 @@ impl Terrain {
     fn create_instance_data(view_distance: i32) -> Vec<f32> {
         let mut instance_data = Vec::new();
         let chunk_size = CHUNK_SIZE;
+        let max_distance_chunks = view_distance as f32 + 0.5;
         
         let mut count = 0;
         for x in -view_distance..=view_distance {
             for z in -view_distance..=view_distance {
-                instance_data.push(x as f32 * chunk_size);
-                instance_data.push(z as f32 * chunk_size);
-                count += 1;
-                
-                // Debug first few instances
-                if count <= 5 {
-                    println!("Instance {}: offset ({}, {})", count - 1, x as f32 * chunk_size, z as f32 * chunk_size);
+                // Check if chunk is within circular distance
+                let chunk_dist_sq = (x * x + z * z) as f32;
+                if chunk_dist_sq <= max_distance_chunks * max_distance_chunks {
+                    instance_data.push(x as f32 * chunk_size);
+                    instance_data.push(z as f32 * chunk_size);
+                    count += 1;
+                    
+                    // Debug first few instances
+                    if count <= 5 {
+                        println!("Instance {}: offset ({}, {})", count - 1, x as f32 * chunk_size, z as f32 * chunk_size);
+                    }
                 }
             }
         }
