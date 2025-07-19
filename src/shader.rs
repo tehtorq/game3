@@ -243,10 +243,13 @@ void main() {
         world_xz = mix(world_xz, snapped_pos, morph_factor);
     }
     
+    // Store original height for fragment shader
     v_height = morph_height;
+    
+    // Keep original terrain height - don't clamp
     v_world_pos = vec3(world_xz.x, morph_height, world_xz.y);
     
-    // Calculate normal
+    // Calculate normal - always use terrain normal
     float delta = mix(2.0, 8.0, morph_factor);
     float hL = get_blended_biome_height(world_xz - vec2(delta, 0.0));
     float hR = get_blended_biome_height(world_xz + vec2(delta, 0.0));
@@ -963,6 +966,7 @@ pub const FRAGMENT_TERRAIN_SIMPLE: &str = r#"#version 100
 precision mediump float;
 
 uniform vec3 color;
+uniform float time;
 
 varying vec3 v_barycentric;
 varying float v_height;
@@ -978,11 +982,58 @@ void main() {
     float height_factor = smoothstep(-100.0, 400.0, v_height);
     terrain_color = mix(terrain_color * 0.7, terrain_color * 1.1, height_factor);
     
-    // Water coloring for low areas
-    if (v_height < -20.0) {
-        vec3 water_color = vec3(0.1, 0.3, 0.5);
-        float water_blend = smoothstep(0.0, -20.0, v_height);
-        terrain_color = mix(terrain_color, water_color, water_blend);
+    // Enhanced water rendering for low areas
+    // Check if we're at or below water level
+    float water_level = -30.0;
+    if (v_height < water_level + 20.0) {
+        // Create water pattern based on world position
+        // This creates a static but realistic water appearance
+        float wave1 = sin(v_world_pos.x * 0.02) * cos(v_world_pos.z * 0.015);
+        float wave2 = sin(v_world_pos.x * 0.01 + v_world_pos.z * 0.01);
+        float wave3 = cos(v_world_pos.x * 0.005) * sin(v_world_pos.z * 0.008);
+        float wave_pattern = (wave1 * 0.4 + wave2 * 0.3 + wave3 * 0.3) * 0.5 + 0.5;
+        
+        // Calculate how close we are to the water surface
+        float distance_to_surface = abs(v_height - water_level);
+        float surface_proximity = 1.0 - smoothstep(0.0, 10.0, distance_to_surface);
+        
+        if (v_height < water_level) {
+            // Underwater terrain - balanced blue tint
+            vec3 shallow_underwater = vec3(0.3, 0.5, 0.8);
+            vec3 deep_underwater = vec3(0.1, 0.2, 0.5);
+            float depth = water_level - v_height;
+            float depth_factor = smoothstep(0.0, 100.0, depth);
+            
+            // Mix between shallow and deep water colors
+            vec3 underwater_tint = mix(shallow_underwater, deep_underwater, depth_factor);
+            
+            // Apply moderate blue tint - keep some terrain visibility
+            terrain_color = terrain_color * 0.5 + underwater_tint * 0.5;
+            
+            // Add caustics effect
+            float caustics = sin(v_world_pos.x * 0.1 + wave_pattern * 3.0) * 
+                           cos(v_world_pos.z * 0.1 - wave_pattern * 2.0);
+            caustics = caustics * 0.5 + 0.5;
+            terrain_color += vec3(0.05, 0.1, 0.15) * caustics * (1.0 - depth_factor) * 0.3;
+            
+            // Subtle fog effect for deep water
+            float fog_factor = smoothstep(100.0, 300.0, depth);
+            terrain_color = mix(terrain_color, deep_underwater, fog_factor * 0.4);
+        }
+        
+        // Add water surface effect when near water level
+        if (surface_proximity > 0.01) {
+            vec3 water_color = vec3(0.05, 0.25, 0.7);  // Deeper blue
+            vec3 highlight_color = vec3(0.3, 0.6, 1.0);  // Brighter blue highlights
+            
+            // Surface highlights
+            float surface_highlight = pow(wave_pattern, 2.0) * surface_proximity;
+            vec3 surface_color = mix(water_color, highlight_color, surface_highlight);
+            
+            // Blend surface with terrain
+            terrain_color = mix(terrain_color, surface_color, surface_proximity * 0.8);
+        }
+        
     }
     
     // Directional lighting with multiple light sources
@@ -992,15 +1043,35 @@ void main() {
     float sun_light = max(dot(v_normal, sun_dir), 0.0);
     float moon_light = max(dot(v_normal, moon_dir), 0.0) * 0.3;
     
-    // Combine lighting
-    float light = sun_light * 0.8 + moon_light + 0.3; // Sun + moon + ambient
+    // Check if this is near water surface
+    float is_water = 1.0 - smoothstep(0.0, 10.0, abs(v_height - (-30.0)));
     
-    // Add some rim lighting for better depth perception
-    float rim = 1.0 - max(dot(v_normal, vec3(0.0, 1.0, 0.0)), 0.0);
-    rim = pow(rim, 2.0) * 0.2;
-    light += rim;
-    
-    terrain_color *= light;
+    // Enhanced lighting for water
+    if (is_water > 0.01) {
+        // Simulate specular highlights using sun direction and normal
+        // Use a fixed view direction approximation
+        vec3 approx_view_dir = normalize(vec3(0.0, 0.5, -1.0));
+        vec3 reflect_dir = reflect(-sun_dir, v_normal);
+        float spec = pow(max(dot(approx_view_dir, reflect_dir), 0.0), 16.0);
+        
+        // Water gets more ambient light and specular
+        float water_light = sun_light * 0.6 + moon_light + 0.5 + spec * 0.5;
+        float terrain_light = sun_light * 0.8 + moon_light + 0.3;
+        
+        // Mix between water and terrain lighting
+        float light = mix(terrain_light, water_light, is_water);
+        terrain_color *= light;
+    } else {
+        // Normal terrain lighting
+        float light = sun_light * 0.8 + moon_light + 0.3;
+        
+        // Add rim lighting for terrain
+        float rim = 1.0 - max(dot(v_normal, vec3(0.0, 1.0, 0.0)), 0.0);
+        rim = pow(rim, 2.0) * 0.2;
+        light += rim;
+        
+        terrain_color *= light;
+    }
     
     // Add subtle detail texture using world position
     float detail = sin(v_world_pos.x * 0.1) * cos(v_world_pos.z * 0.1) * 0.05;
@@ -1069,6 +1140,7 @@ pub fn meta_terrain_simple() -> ShaderMeta {
                 UniformDesc::new("chunk_offset", UniformType::Float2),
                 UniformDesc::new("lod_scale", UniformType::Float1),
                 UniformDesc::new("camera_pos", UniformType::Float3),
+                UniformDesc::new("time", UniformType::Float1),
             ],
         },
     }
@@ -1131,11 +1203,11 @@ pub struct UniformsTerrainGPU {
     pub lod_scale: f32,
     pub _padding: f32,
     pub camera_pos: [f32; 3],
-    pub _padding2: f32,
+    pub time: f32,
 }
 
 impl UniformsTerrainGPU {
-    pub fn new(mvp: Mat4, color: [f32; 3], morph_factor: f32, chunk_offset: [f32; 2], lod_scale: f32, camera_pos: Vec3) -> Self {
+    pub fn new(mvp: Mat4, color: [f32; 3], morph_factor: f32, chunk_offset: [f32; 2], lod_scale: f32, camera_pos: Vec3, time: f32) -> Self {
         Self {
             mvp: mvp.to_cols_array_2d(),
             color,
@@ -1144,7 +1216,7 @@ impl UniformsTerrainGPU {
             lod_scale,
             _padding: 0.0,
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z],
-            _padding2: 0.0,
+            time,
         }
     }
 }

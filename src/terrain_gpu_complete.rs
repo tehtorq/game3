@@ -23,7 +23,7 @@ impl TerrainGPUComplete {
     pub fn new(ctx: &mut dyn RenderingBackend) -> Self {
         // Create a large grid for GPU terrain
         let grid_size = 512; // 512x512 grid for good detail/performance balance
-        let grid_spacing = 24.0; // 24 units between vertices
+        let grid_spacing = 30.0; // 30 units between vertices (increased 25% from 24.0)
         
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
@@ -160,7 +160,7 @@ impl TerrainGPUComplete {
         self.terrain_instance = Some(terrain);
     }
     
-    pub fn draw(&self, ctx: &mut dyn RenderingBackend, pipeline: &Pipeline, mvp: Mat4, base_color: [f32; 3], player_pos: Vec3) -> i32 {
+    pub fn draw(&self, ctx: &mut dyn RenderingBackend, pipeline: &Pipeline, mvp: Mat4, base_color: [f32; 3], player_pos: Vec3, elapsed_time: f32) -> i32 {
         ctx.apply_pipeline(pipeline);
         
         // Create bindings with textures if available
@@ -186,13 +186,18 @@ impl TerrainGPUComplete {
             (player_pos.z / self.grid_spacing).floor() * self.grid_spacing
         ];
         
+        // Use elapsed time for water animation
+        // Use modulo to keep time values reasonable and prevent precision issues
+        let time = elapsed_time % 1000.0;
+        
         let uniforms = UniformsTerrainGPU::new(
             mvp,
             base_color,
             0.0, // No morphing for single LOD
             chunk_offset,
             self.grid_spacing,
-            player_pos
+            player_pos,
+            time
         );
         
         ctx.apply_uniforms(UniformsSource::table(&uniforms));

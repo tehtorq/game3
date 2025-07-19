@@ -141,13 +141,15 @@ impl TerrainGPUBatch {
                     LodLevel::Low => 0.0, // No morphing for lowest LOD
                 };
                 
+                let time = (miniquad::date::now() as f32) * 0.001;
                 let uniforms = UniformsTerrainGPU::new(
                     mvp,
                     color,
                     morph_factor * base_morph,
                     chunk_offset,
                     lod_scale,
-                    player_pos
+                    player_pos,
+                    time
                 );
                 
                 ctx.apply_uniforms(UniformsSource::table(&uniforms));

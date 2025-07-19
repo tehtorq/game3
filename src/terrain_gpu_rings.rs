@@ -79,13 +79,15 @@ impl TerrainGPURings {
             let chunk_offset = [self.player_pos.x, self.player_pos.z];
             let lod_scale = (ring.radius_outer - ring.radius_inner) / ring.segments as f32;
             
+            let time = (miniquad::date::now() as f32) * 0.001;
             let uniforms = UniformsTerrainGPU::new(
                 mvp,
                 color,
                 morph_factor,
                 chunk_offset,
                 lod_scale,
-                self.player_pos
+                self.player_pos,
+                time
             );
             
             ctx.apply_uniforms(UniformsSource::table(&uniforms));

@@ -15,7 +15,6 @@ mod terrain_gpu_batch;
 mod terrain_predictive;
 mod terrain_clipmap;
 mod terrain_gpu_rings;
-mod terrain_gpu_grid;
 mod terrain_gpu_complete;
 mod biome;
 mod player;
@@ -48,11 +47,7 @@ use sounds::{SoundSystem, MusicState};
 
 // Default screen dimensions are now dynamically calculated at 75% of monitor size
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum TerrainMode {
-    GPUGrid,     // Simple grid-based GPU terrain
-    GPUComplete, // Complete GPU terrain with textures
-}
+// Removed TerrainMode enum - only using GPUComplete now
 
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
@@ -69,9 +64,7 @@ struct Stage {
     input: InputState,
     paused: bool,
     terrain_gpu_rings: Option<terrain_gpu_rings::TerrainGPURings>,
-    terrain_gpu_grid: Option<terrain_gpu_grid::TerrainGPUGrid>,
     terrain_gpu_complete: Option<terrain_gpu_complete::TerrainGPUComplete>,
-    terrain_mode: TerrainMode,
     terrain_simple_pipeline: Pipeline,
     hud: HUD,
     // FPS tracking fields
@@ -86,6 +79,8 @@ struct Stage {
     sound_system: SoundSystem,
     // Bullet instancing
     bullet_instance_system: BulletInstancingSystem,
+    // Start time for animations
+    start_time: f64,
 }
 
 
@@ -365,7 +360,6 @@ impl Stage {
         
         // GPU terrain alternatives
         let terrain_gpu_rings = None;
-        let terrain_gpu_grid = None;
         let terrain_gpu_complete = Some(terrain_gpu_complete);
         
         let stage = Self {
@@ -384,9 +378,7 @@ impl Stage {
             input: InputState::default(),
             paused: false,
             terrain_gpu_rings,
-            terrain_gpu_grid,
             terrain_gpu_complete,
-            terrain_mode: TerrainMode::GPUComplete,
             hud: HUD::new(),
             frame_count: 0,
             fps_timer: 0.0,
@@ -395,6 +387,7 @@ impl Stage {
             mouse_captured: true,
             sound_system: SoundSystem::new(),
             bullet_instance_system,
+            start_time: miniquad::date::now(),
         };
         
         // Start in fullscreen with mouse captured
@@ -404,10 +397,7 @@ impl Stage {
         window::show_mouse(false);
         
         println!("\n=== Terrain Rendering System ===");
-        println!("Press T to cycle through terrain modes:");
-        println!("  1. GPUComplete - Full GPU terrain with biomes");
-        println!("  2. GPUGrid - Simple GPU grid terrain");
-        println!("Current mode: GPUComplete");
+        println!("GPUComplete terrain mode active - Full GPU terrain with biomes");
         println!("================================\n");
         
         stage
@@ -524,33 +514,20 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
-        // Draw terrain based on selected mode
-        let terrain_triangles = match self.terrain_mode {
-            TerrainMode::GPUGrid => {
-                if let Some(ref grid) = self.terrain_gpu_grid {
-                    let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-                    unsafe {
-                        grid.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos)
-                    }
-                } else {
-                    0
-                }
-            },
-            TerrainMode::GPUComplete => {
-                if let Some(ref terrain) = self.terrain_gpu_complete {
-                    let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-                    unsafe {
-                        terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos)
-                    }
-                } else {
-                    0
-                }
-            },
+        // Draw terrain
+        let elapsed_time = (current_time - self.start_time) as f32;
+        let terrain_triangles = if let Some(ref terrain) = self.terrain_gpu_complete {
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            unsafe {
+                terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos, elapsed_time)
+            }
+        } else {
+            0
         };
         
         // Log terrain performance periodically
         if self.frame_count % 300 == 0 && terrain_triangles > 0 {
-            println!("Terrain mode: {:?}, triangles: {}", self.terrain_mode, terrain_triangles);
+            println!("Terrain triangles: {}", terrain_triangles);
         }
         
         // Draw bases first (in red/orange)
@@ -1305,24 +1282,7 @@ impl EventHandler for Stage {
             KeyCode::Minus | KeyCode::KpSubtract => self.hud.zoom_out(),
             KeyCode::Equal | KeyCode::KpAdd => self.hud.zoom_in(),
             KeyCode::T => {
-                // Cycle through terrain modes
-                self.terrain_mode = match self.terrain_mode {
-                    TerrainMode::GPUComplete => {
-                        println!("Switching to GPU Grid terrain");
-                        // Create GPU grid terrain if not exists
-                        if self.terrain_gpu_grid.is_none() {
-                            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
-                            self.terrain_gpu_grid = Some(unsafe {
-                                terrain_gpu_grid::TerrainGPUGrid::new(&mut *ctx_ptr)
-                            });
-                        }
-                        TerrainMode::GPUGrid
-                    },
-                    TerrainMode::GPUGrid => {
-                        println!("Switching to GPU Complete terrain");
-                        TerrainMode::GPUComplete
-                    },
-                };
+                println!("GPUComplete terrain mode is the only available mode");
             },
             _ => {}
         }

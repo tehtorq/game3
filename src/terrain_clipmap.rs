@@ -185,13 +185,15 @@ impl TerrainClipmap {
                 0.0
             };
             
+            let time = (miniquad::date::now() as f32) * 0.001;
             let uniforms = UniformsTerrainGPU::new(
                 mvp,
                 [0.2, 0.8, 0.2], // Green terrain
                 morph_factor,
                 chunk_offset,
                 ring.scale,
-                player_pos
+                player_pos,
+                time
             );
             
             ctx.apply_uniforms(UniformsSource::table(&uniforms));
