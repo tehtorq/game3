@@ -1,6 +1,6 @@
 use miniquad::*;
 use crate::vertex::Vertex;
-use crate::terrain_chunk::LodLevel;
+use super::chunk::LodLevel;
 
 pub struct TerrainBatch {
     pub lod: LodLevel,

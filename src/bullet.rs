@@ -14,6 +14,7 @@ pub enum BulletType {
 pub struct Bullet {
     pub pos: Vec3,
     pub vel: Vec3,
+    pub lifetime: f32,
     pub bullet_type: BulletType,
 }
 
@@ -30,6 +31,7 @@ impl Bullet {
         Self {
             pos: spawn_pos,
             vel: forward * 1200.0,
+            lifetime: 5.0,
             bullet_type: BulletType::Player,
         }
     }
@@ -38,6 +40,7 @@ impl Bullet {
         Self {
             pos: enemy.pos + direction * 30.0,
             vel: direction * 600.0, // Enemy bullets are slower
+            lifetime: 5.0,
             bullet_type: BulletType::Enemy,
         }
     }
@@ -46,12 +49,14 @@ impl Bullet {
         Self {
             pos,
             vel: direction * 600.0,
+            lifetime: 5.0,
             bullet_type,
         }
     }
 
     pub fn update(&mut self, dt: f32) {
         self.pos += self.vel * dt;
+        self.lifetime -= dt;
     }
     
     pub fn get_debug_info(&self) -> String {

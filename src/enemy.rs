@@ -2,10 +2,10 @@ use glam::Vec3;
 use rand::prelude::*;
 use crate::renderer::{Renderer, Drawable};
 use crate::math::rotation_matrix;
-use crate::terrain_generation;
+use crate::terrain;
 use std::f32::consts::PI;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum EnemyType {
     Cube,      // Basic enemy that follows terrain
     Pyramid,   // Fast enemy that dives and climbs
@@ -37,7 +37,7 @@ pub enum MovementPattern {
     Drifting,   // Slow carrier movement
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum AlertState {
     Unaware,     // Normal patrol behavior
     Suspicious,  // Heard something, investigating
@@ -107,7 +107,7 @@ impl Enemy {
         let mut rng = thread_rng();
         
         // Calculate spawn height based on terrain
-        let terrain_height = terrain_generation::height_at(x, z);
+        let terrain_height = terrain::height_at(x, z);
         let spawn_height = terrain_height + rng.gen_range(30.0..100.0);
         
         // Assign movement pattern based on enemy type
@@ -188,7 +188,7 @@ impl Enemy {
                 let radius_variation = patrol_radius * rng.gen_range(0.7..1.3);
                 let wx = x + angle.cos() * radius_variation;
                 let wz = z + angle.sin() * radius_variation;
-                let wy = terrain_generation::height_at(wx, wz) + rng.gen_range(50.0..200.0);
+                let wy = terrain::height_at(wx, wz) + rng.gen_range(50.0..200.0);
                 waypoints.push(Vec3::new(wx, wy, wz));
             }
             waypoints
@@ -443,7 +443,7 @@ impl Enemy {
         match effective_pattern {
             MovementPattern::Hover => {
                 // Maintain altitude above terrain
-                let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                 let hover_height = terrain_height + 50.0 + (self.phase * 0.5).sin() * 15.0;
                 
                 // Smooth altitude adjustment
@@ -506,7 +506,7 @@ impl Enemy {
                 let angle = self.phase * orbit_speed;
                 let target_x = self.spawn_point.x + angle.cos() * orbit_radius;
                 let target_z = self.spawn_point.z + angle.sin() * orbit_radius;
-                let target_y = terrain_generation::height_at(target_x, target_z) + 60.0 + (self.phase * 2.0).sin() * 20.0;
+                let target_y = terrain::height_at(target_x, target_z) + 60.0 + (self.phase * 2.0).sin() * 20.0;
                 
                 let target = Vec3::new(target_x, target_y, target_z);
                 let to_target = target - self.pos;
@@ -519,7 +519,7 @@ impl Enemy {
                 
                 if dive_cycle < 2.0 {
                     // Climbing phase
-                    let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                    let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                     let climb_target = terrain_height + 150.0;
                     self.vel.y = (climb_target - self.pos.y).clamp(-self.speed, self.speed);
                     
@@ -581,7 +581,7 @@ impl Enemy {
                 }
                 
                 // Maintain some altitude
-                let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                 if self.pos.y < terrain_height + 30.0 {
                     self.vel.y = (self.vel.y + 50.0).max(0.0);
                 }
@@ -602,7 +602,7 @@ impl Enemy {
                 self.vel = (to_player_norm * self.speed + swarm_offset) * self.aggression;
                 
                 // Maintain low altitude for swarming
-                let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                 let swarm_height = terrain_height + 30.0 + (self.phase * 3.0).sin() * 10.0;
                 self.vel.y = (swarm_height - self.pos.y) * 3.0;
             },
@@ -620,7 +620,7 @@ impl Enemy {
                     self.pos.z = player_pos.z + angle.sin() * distance;
                     
                     // Set altitude
-                    let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                    let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                     self.pos.y = terrain_height + 100.0;
                     
                     self.teleport_charge = 0.0;
@@ -636,7 +636,7 @@ impl Enemy {
                 self.vel = Vec3::ZERO;
                 
                 // Maintain altitude
-                let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                 let hover_height = terrain_height + 60.0;
                 self.pos.y = self.pos.y * 0.9 + hover_height * 0.1;
             },
@@ -648,7 +648,7 @@ impl Enemy {
                 self.vel.z = drift_angle.sin() * self.speed;
                 
                 // Maintain high altitude
-                let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+                let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
                 let cruise_height = terrain_height + 150.0;
                 self.vel.y = (cruise_height - self.pos.y).clamp(-20.0, 20.0);
             },
@@ -698,7 +698,7 @@ impl Enemy {
         }
         
         // Ensure enemies don't go below terrain
-        let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+        let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
         if self.pos.y < terrain_height + 10.0 {
             self.pos.y = terrain_height + 10.0;
             self.vel.y = self.vel.y.max(0.0);
@@ -878,7 +878,7 @@ impl Enemy {
         let distance_to_player = to_player.length();
         
         // Hover movement pattern with slow approach
-        let terrain_height = terrain_generation::height_at(self.pos.x, self.pos.z);
+        let terrain_height = terrain::height_at(self.pos.x, self.pos.z);
         let hover_height = terrain_height + 80.0 + (self.phase * 0.3).sin() * 20.0;
         
         // Smooth altitude adjustment
@@ -957,9 +957,6 @@ impl Enemy {
         None // Laser enemies don't shoot bullets
     }
     
-    pub fn is_laser_active(&self) -> bool {
-        self.laser_active
-    }
     
     pub fn get_laser_end_point(&self) -> Vec3 {
         // Calculate laser end point based on current horizontal and vertical angles
@@ -1024,6 +1021,71 @@ impl Enemy {
             self.vortex_strength
         } else {
             0.0
+        }
+    }
+    
+    pub fn is_laser_active(&self) -> bool {
+        self.enemy_type == EnemyType::Laser && self.laser_active
+    }
+    
+    pub fn is_player_in_laser(&self, player_pos: Vec3) -> bool {
+        if !self.is_laser_active() {
+            return false;
+        }
+        
+        // Check if player is within laser beam
+        let to_player = player_pos - self.pos;
+        let laser_dir = Vec3::new(
+            self.laser_angle_h.cos() * self.laser_angle_v.cos(),
+            self.laser_angle_v.sin(),
+            self.laser_angle_h.sin() * self.laser_angle_v.cos()
+        );
+        
+        let dot = to_player.normalize().dot(laser_dir);
+        dot > 0.98 && to_player.length() < 500.0 // Within laser range and angle
+    }
+    
+    pub fn is_disrupting(&self) -> bool {
+        self.enemy_type == EnemyType::Disruptor && self.wave_charge > 2.0
+    }
+    
+    pub fn is_vortex_active(&self) -> bool {
+        self.enemy_type == EnemyType::Vortex && self.vortex_strength > 0.0
+    }
+    
+    pub fn alert_to_sound(&mut self, sound_pos: Vec3) {
+        if self.alert_state == AlertState::Unaware {
+            self.alert_state = AlertState::Suspicious;
+            self.investigation_point = sound_pos;
+            self.alert_cooldown = 3.0;
+        }
+    }
+    
+    pub fn try_shoot(&mut self) -> Option<crate::bullet::Bullet> {
+        if self.can_attack && self.attack_cooldown <= 0.0 && self.alert_state == AlertState::Alert {
+            let bullet_type = crate::bullet::BulletType::Enemy;
+            let mut bullet = crate::bullet::Bullet {
+                pos: self.pos,
+                vel: (self.last_known_player_pos - self.pos).normalize() * 400.0,
+                lifetime: 5.0,
+                bullet_type,
+            };
+            bullet.pos.y += 10.0; // Shoot from center of enemy
+            
+            // Reset attack cooldown based on enemy type
+            self.attack_cooldown = match self.enemy_type {
+                EnemyType::Cube => 2.0,
+                EnemyType::Pyramid => 1.5,
+                EnemyType::Hunter => 1.0,
+                EnemyType::Guardian => 2.5,
+                EnemyType::Spinner => 1.8,
+                EnemyType::Phaser => 3.0,  // Snipers shoot less often
+                _ => 2.0,  // Default cooldown
+            };
+            
+            Some(bullet)
+        } else {
+            None
         }
     }
     

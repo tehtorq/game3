@@ -7,7 +7,7 @@ use crate::mine::Mine;
 
 // Use the terrain height calculation from the terrain generation module
 fn terrain_height_at(x: f32, z: f32) -> f32 {
-    crate::terrain_generation::height_at(x, z)
+    crate::terrain::height_at(x, z)
 }
 use crate::bullet::{Bullet, BulletType};
 use crate::particle::{Particle, ParticleType};

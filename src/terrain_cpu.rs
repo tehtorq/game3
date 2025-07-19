@@ -1,10 +1,10 @@
 use glam::Vec2;
 use miniquad::*;
 use std::collections::HashMap;
-use crate::terrain_chunk::{TerrainChunk, LodLevel};
-use crate::terrain_generation::get_blended_biome_height;
+use crate::terrain::{Chunk as TerrainChunk, chunk::LodLevel};
+use crate::terrain::generation::get_blended_biome_height;
 use crate::terrain_gpu_batch::TerrainGPUBatch;
-use crate::terrain_predictive::PredictiveLoader;
+use crate::terrain::predictive::PredictiveLoader;
 
 const CHUNK_SIZE: f32 = 160.0; // Larger chunks for better performance
 

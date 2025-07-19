@@ -2,8 +2,8 @@ use miniquad::*;
 use glam::{Vec3, Mat4};
 use crate::vertex::Vertex;
 use crate::shader::UniformsTerrainGPU;
-use crate::terrain::Terrain;
-use crate::terrain_cache::TerrainCache;
+use super::cache::TerrainCache;
+use super::mesh::Terrain;
 use crate::constants::*;
 
 // Complete GPU terrain with texture support

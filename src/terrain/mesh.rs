@@ -2,13 +2,10 @@ use miniquad::*;
 use glam::Vec2;
 use crate::vertex::Vertex;
 use crate::biome::{BiomeMap, Biome};
+use super::generation::height_at;
+use super::biome_heights::smoothstep;
 use crate::constants::*;
 
-// Smoothstep function (matches GLSL smoothstep)
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
 
 pub struct Terrain {
     base_mesh_vertex_buffer: BufferId,
@@ -125,7 +122,7 @@ impl Terrain {
         seed: u32,
         save_name: Option<&str>
     ) -> Self {
-        use crate::terrain_cache::TerrainCache;
+        use super::cache::TerrainCache;
         
         // Create base mesh (single chunk template)
         let (vertices, indices) = Self::create_base_mesh();

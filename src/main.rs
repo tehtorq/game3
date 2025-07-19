@@ -6,19 +6,10 @@ mod math;
 mod vertex;
 mod renderer;
 mod terrain;
-mod terrain_cache;
-mod terrain_chunk;
-mod terrain_generation;
-mod terrain_lod_blend;
-mod terrain_batch;
-mod terrain_gpu_batch;
-mod terrain_predictive;
-mod terrain_clipmap;
-mod terrain_gpu_rings;
-mod terrain_gpu_complete;
 mod biome;
 mod player;
 mod enemy;
+mod enemies;
 mod bullet;
 mod bullet_instanced;
 mod particle;
@@ -32,6 +23,10 @@ mod shader_volumetric_laser;
 mod game;
 mod constants;
 mod sounds;
+mod app;
+mod graphics;
+mod input;
+mod skybox;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
@@ -63,8 +58,8 @@ struct Stage {
     camera: Camera,
     input: InputState,
     paused: bool,
-    terrain_gpu_rings: Option<terrain_gpu_rings::TerrainGPURings>,
-    terrain_gpu_complete: Option<terrain_gpu_complete::TerrainGPUComplete>,
+    terrain_gpu_rings: Option<terrain::TerrainGPURings>,
+    terrain_gpu_complete: Option<terrain::TerrainGPUComplete>,
     terrain_simple_pipeline: Pipeline,
     hud: HUD,
     // FPS tracking fields
@@ -81,6 +76,8 @@ struct Stage {
     bullet_instance_system: BulletInstancingSystem,
     // Start time for animations
     start_time: f64,
+    // Skybox
+    skybox: skybox::Skybox,
 }
 
 
@@ -349,7 +346,7 @@ impl Stage {
         // Create GPUComplete terrain on startup
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
         let mut terrain_gpu_complete = unsafe {
-            terrain_gpu_complete::TerrainGPUComplete::new(&mut *ctx_ptr)
+            terrain::TerrainGPUComplete::new(&mut *ctx_ptr)
         };
         
         // Load or generate textures for the complete terrain
@@ -361,6 +358,9 @@ impl Stage {
         // GPU terrain alternatives
         let terrain_gpu_rings = None;
         let terrain_gpu_complete = Some(terrain_gpu_complete);
+        
+        // Create skybox before moving ctx
+        let skybox = skybox::Skybox::new(&mut *ctx);
         
         let stage = Self {
             ctx,
@@ -388,6 +388,7 @@ impl Stage {
             sound_system: SoundSystem::new(),
             bullet_instance_system,
             start_time: miniquad::date::now(),
+            skybox,
         };
         
         // Start in fullscreen with mouse captured
@@ -514,6 +515,14 @@ impl EventHandler for Stage {
             stencil: None,
         });
         
+        // Draw skybox first (behind everything)
+        {
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            unsafe {
+                self.skybox.draw(&mut *ctx_ptr, mvp, self.game.player.pos);
+            }
+        }
+        
         // Draw terrain
         let elapsed_time = (current_time - self.start_time) as f32;
         let terrain_triangles = if let Some(ref terrain) = self.terrain_gpu_complete {
@@ -591,7 +600,8 @@ impl EventHandler for Stage {
                         let _alert_color = match enemy.alert_state {
                             AlertState::Alert => {
                                 // Flash red when actively attacking
-                                let flash = (self.game.enemy_spawn_timer * 5.0).sin() * 0.5 + 0.5;
+                                let elapsed = (miniquad::date::now() - self.start_time) as f32;
+                                let flash = (elapsed * 5.0).sin() * 0.5 + 0.5;
                                 [color[0] + flash * (1.0 - color[0]), 
                                  color[1] * (1.0 - flash * 0.5), 
                                  color[2] * (1.0 - flash * 0.5)]
@@ -665,7 +675,8 @@ impl EventHandler for Stage {
                     AlertState::Searching => {
                         // Draw rotating search lines
                         let base_pos = enemy.pos + Vec3::new(0.0, 30.0, 0.0);
-                        let search_angle = self.game.enemy_spawn_timer * 2.0;
+                        let elapsed = (miniquad::date::now() - self.start_time) as f32;
+                        let search_angle = elapsed * 2.0;
                         for i in 0..3 {
                             let angle = search_angle + i as f32 * PI * 2.0 / 3.0;
                             let end_pos = base_pos + Vec3::new(angle.cos() * 15.0, 0.0, angle.sin() * 15.0);
@@ -1060,7 +1071,8 @@ impl EventHandler for Stage {
                         _padding5: f32,
                     }
                     
-                    let time = self.game.enemy_spawn_timer as f32;
+                    let elapsed = (miniquad::date::now() - self.start_time) as f32;
+                    let time = elapsed;
                     let uniforms = VolumetricLaserUniforms {
                         mvp: mvp.to_cols_array_2d(),
                         color: [1.0, 1.0, 0.0], // Yellow laser

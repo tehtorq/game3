@@ -66,7 +66,7 @@ impl TerrainHeightCache {
 // Public interface
 pub fn cached_height_at(x: f32, z: f32) -> f32 {
     HEIGHT_CACHE.lock().unwrap().get_or_calculate(x, z, |x, z| {
-        crate::terrain_generation::height_at(x, z)
+        super::generation::height_at(x, z)
     })
 }
 

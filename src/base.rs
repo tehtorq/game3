@@ -1,5 +1,6 @@
 use glam::Vec3;
 use crate::renderer::{Renderer, Drawable};
+use crate::terrain::height_at;
 use rand::prelude::*;
 use std::f32::consts::PI;
 
@@ -17,10 +18,11 @@ pub struct Base {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BaseType {
-    Small,   // 2 turrets, spawns basic enemies
-    Medium,  // 4 turrets, spawns intermediate enemies  
-    Large,   // 6 turrets, spawns advanced enemies
-    Fortress,// 8 turrets, spawns boss-tier enemies
+    Basic,     // 2 turrets, spawns basic enemies
+    Heavy,     // 4 turrets, spawns intermediate enemies  
+    Shielded,  // 4 turrets with shields, spawns defensive enemies
+    Fortress,  // 8 turrets, spawns boss-tier enemies
+    Outpost,   // 1 turret, spawns swarm enemies
 }
 
 pub struct Turret {
@@ -45,33 +47,35 @@ pub struct GroundTurret {
 impl Base {
     pub fn new(x: f32, z: f32, base_type: BaseType) -> Self {
         // Sample terrain around base location to ensure proper placement
-        let mut base_height = terrain_height_at(x, z);
+        let mut base_height = height_at(x, z);
         let sample_radius = 50.0;
         for i in 0..8 {
             let angle = i as f32 * PI * 0.25;
             let sample_x = x + angle.cos() * sample_radius;
             let sample_z = z + angle.sin() * sample_radius;
-            base_height = base_height.max(terrain_height_at(sample_x, sample_z));
+            base_height = base_height.max(height_at(sample_x, sample_z));
         }
         let y = base_height + 30.0; // Place base well above highest nearby terrain
         let pos = Vec3::new(x, y, z);
         
         // Create turrets based on base type
         let (turret_count, spawn_interval) = match base_type {
-            BaseType::Small => (2, 20.0),    // Much slower enemy spawning
-            BaseType::Medium => (4, 16.0),
-            BaseType::Large => (6, 12.0),
+            BaseType::Basic => (2, 20.0),    // Much slower enemy spawning
+            BaseType::Heavy => (4, 16.0),
+            BaseType::Shielded => (4, 18.0),
             BaseType::Fortress => (8, 10.0),
+            BaseType::Outpost => (1, 8.0),
         };
         
         let mut turrets = Vec::new();
         for i in 0..turret_count {
             let angle = i as f32 * PI * 2.0 / turret_count as f32;
             let radius = match base_type {
-                BaseType::Small => 60.0,   // Spread base turrets out more too
-                BaseType::Medium => 90.0,
-                BaseType::Large => 120.0,
+                BaseType::Basic => 60.0,   // Spread base turrets out more too
+                BaseType::Heavy => 90.0,
+                BaseType::Shielded => 80.0,
                 BaseType::Fortress => 150.0,
+                BaseType::Outpost => 40.0,
             };
             
             turrets.push(Turret {
@@ -80,23 +84,25 @@ impl Base {
                 pitch: 0.0,
                 fire_timer: i as f32 * 0.5, // Stagger initial fire times
                 tracking_speed: 4.0,
-                range: 6000.0, // Double range - engage from very far away
+                range: 1500.0, // Reasonable engagement range
             });
         }
         
         // Create ground turrets - heavy defensive emplacements
         let ground_turret_count = match base_type {
-            BaseType::Small => 6,     // More turrets for chaos
-            BaseType::Medium => 8,
-            BaseType::Large => 12,
+            BaseType::Basic => 6,     // More turrets for chaos
+            BaseType::Heavy => 8,
+            BaseType::Shielded => 10,
             BaseType::Fortress => 16,
+            BaseType::Outpost => 2,
         };
         
         let ground_turret_radius = match base_type {
-            BaseType::Small => 200.0,   // Spread out more
-            BaseType::Medium => 300.0,
-            BaseType::Large => 400.0,
+            BaseType::Basic => 200.0,   // Spread out more
+            BaseType::Heavy => 300.0,
+            BaseType::Shielded => 250.0,
             BaseType::Fortress => 500.0,
+            BaseType::Outpost => 100.0,
         };
         
         let mut ground_turrets = Vec::new();
@@ -105,7 +111,7 @@ impl Base {
             let turret_x = x + angle.cos() * ground_turret_radius;
             let turret_z = z + angle.sin() * ground_turret_radius;
             // Calculate terrain height and add extra clearance
-            let base_terrain_height = terrain_height_at(turret_x, turret_z);
+            let base_terrain_height = height_at(turret_x, turret_z);
             
             // Sample a few points around the turret to get max height
             let sample_radius = 20.0;
@@ -114,7 +120,7 @@ impl Base {
                 let sample_angle = j as f32 * PI * 0.5;
                 let sample_x = turret_x + sample_angle.cos() * sample_radius;
                 let sample_z = turret_z + sample_angle.sin() * sample_radius;
-                let sample_height = terrain_height_at(sample_x, sample_z);
+                let sample_height = height_at(sample_x, sample_z);
                 max_height = max_height.max(sample_height);
             }
             
@@ -134,10 +140,11 @@ impl Base {
         Self {
             pos,
             health: match base_type {
-                BaseType::Small => 100.0,
-                BaseType::Medium => 200.0,
-                BaseType::Large => 300.0,
+                BaseType::Basic => 100.0,
+                BaseType::Heavy => 200.0,
+                BaseType::Shielded => 250.0,
                 BaseType::Fortress => 500.0,
+                BaseType::Outpost => 75.0,
             },
             turrets,
             ground_turrets,
@@ -205,8 +212,8 @@ impl Base {
             let to_player = player_pos - ground_turret.pos;
             let distance = to_player.length();
             
-            // Ground turrets have extreme range for early engagement
-            if distance < 10000.0 && distance > 20.0 { // Extreme range - start firing very early
+            // Ground turrets have longer range than base turrets
+            if distance < 2000.0 && distance > 20.0 { // Longer range for ground defense
                 // Calculate desired rotation to face player
                 let horizontal_dir = Vec3::new(to_player.x, 0.0, to_player.z).normalize();
                 let target_rotation = horizontal_dir.z.atan2(horizontal_dir.x);
@@ -278,6 +285,16 @@ impl Base {
         self.is_active && self.spawn_timer <= 0.0
     }
     
+    pub fn can_spawn(&self) -> bool {
+        self.is_active && self.spawn_timer <= 0.0
+    }
+    
+    pub fn update_spawn_timer(&mut self, dt: f32) {
+        if self.spawn_timer > 0.0 {
+            self.spawn_timer -= dt;
+        }
+    }
+    
     pub fn reset_spawn_timer(&mut self) {
         self.spawn_timer = self.spawn_interval;
     }
@@ -286,10 +303,11 @@ impl Base {
         use crate::enemy::EnemyType;
         
         match self.base_type {
-            BaseType::Small => vec![EnemyType::Cube, EnemyType::Pyramid],
-            BaseType::Medium => vec![EnemyType::Spinner, EnemyType::Swarm, EnemyType::Shield],
-            BaseType::Large => vec![EnemyType::Hunter, EnemyType::Laser, EnemyType::Bomber, EnemyType::Phaser],
+            BaseType::Basic => vec![EnemyType::Cube, EnemyType::Pyramid],
+            BaseType::Heavy => vec![EnemyType::Spinner, EnemyType::Hunter, EnemyType::Guardian],
+            BaseType::Shielded => vec![EnemyType::Shield, EnemyType::Reflector, EnemyType::Disruptor],
             BaseType::Fortress => vec![EnemyType::Guardian, EnemyType::Vortex, EnemyType::Carrier, EnemyType::Reflector],
+            BaseType::Outpost => vec![EnemyType::Swarm, EnemyType::Phaser],
         }
     }
     
@@ -297,17 +315,19 @@ impl Base {
         // Generate patrol routes radiating from base - MUCH larger for huge map
         let mut routes = Vec::new();
         let route_count = match self.base_type {
-            BaseType::Small => 2,
-            BaseType::Medium => 3,
-            BaseType::Large => 4,
+            BaseType::Basic => 2,
+            BaseType::Heavy => 3,
+            BaseType::Shielded => 3,
             BaseType::Fortress => 6,
+            BaseType::Outpost => 1,
         };
         
         let route_length = match self.base_type {
-            BaseType::Small => 10000.0,
-            BaseType::Medium => 15000.0,
-            BaseType::Large => 20000.0,
+            BaseType::Basic => 10000.0,
+            BaseType::Heavy => 15000.0,
+            BaseType::Shielded => 12000.0,
             BaseType::Fortress => 25000.0,
+            BaseType::Outpost => 5000.0,
         };
         
         for i in 0..route_count {
@@ -321,7 +341,7 @@ impl Base {
                 let current_angle = angle + angle_variation;
                 let x = self.pos.x + current_angle.cos() * distance;
                 let z = self.pos.z + current_angle.sin() * distance;
-                let y = terrain_height_at(x, z) + 100.0 + (j as f32 * 30.0);
+                let y = height_at(x, z) + 100.0 + (j as f32 * 30.0);
                 waypoints.push(Vec3::new(x, y, z));
             }
             
@@ -339,10 +359,11 @@ impl Drawable for Base {
         }
         
         let size = match self.base_type {
-            BaseType::Small => 50.0,   // Bigger bases to match spread turrets
-            BaseType::Medium => 70.0,
-            BaseType::Large => 90.0,
+            BaseType::Basic => 50.0,   // Bigger bases to match spread turrets
+            BaseType::Heavy => 70.0,
+            BaseType::Shielded => 80.0,
             BaseType::Fortress => 120.0,
+            BaseType::Outpost => 30.0,
         };
         
         // Draw main structure - octagonal base
@@ -377,10 +398,11 @@ impl Drawable for Base {
         
         // Draw central spire
         let spire_height = match self.base_type {
-            BaseType::Small => 40.0,
-            BaseType::Medium => 60.0,
-            BaseType::Large => 80.0,
+            BaseType::Basic => 40.0,
+            BaseType::Heavy => 60.0,
+            BaseType::Shielded => 70.0,
             BaseType::Fortress => 100.0,
+            BaseType::Outpost => 20.0,
         };
         let spire_top = self.pos + Vec3::new(0.0, spire_height, 0.0);
         let spire_size = size * 0.3;
@@ -525,34 +547,6 @@ impl Drawable for Base {
     }
 }
 
-// Helper function to calculate terrain height
-fn terrain_height_at(x: f32, z: f32) -> f32 {
-    let base_y = 20.0;
-    
-    // Large-scale terrain features
-    let mut large_scale = (x * 0.0005).sin() * (z * 0.0007).sin() * 240.0;
-    large_scale += (x * 0.0003 + 1.5).cos() * (z * 0.0004 - 0.8).sin() * 200.0;
-    
-    // Gentle slopes
-    let mut gentle = (x * 0.0031).sin() * (z * 0.0027).cos() * 25.0;
-    gentle += (x * 0.0047).sin() * (z * 0.0053).sin() * 20.0;
-    
-    // Roughness
-    let mut roughness = (x * 0.0023 + 2.7).sin() * (z * 0.0019 - 1.3).cos();
-    roughness += (x * 0.0041 - z * 0.0037).sin() * 0.5;
-    roughness = (roughness + 1.5) / 3.0;
-    roughness = if roughness < 0.6 { 0.0 } else if roughness > 0.8 { 1.0 } else { (roughness - 0.6) / 0.2 };
-    
-    // Bumpy details
-    let mut bumps = 0.0;
-    bumps += (x * 0.0173).sin() * (z * 0.0199).sin() * 20.0;
-    bumps += (x * 0.0293 + 2.1).cos() * (z * 0.0311 - 1.7).sin() * 15.0;
-    bumps += (x * 0.0519 + z * 0.0413).sin() * 8.0;
-    bumps += (x * 0.0871 - z * 0.0926).sin() * 5.0;
-    bumps += (x * 0.137).sin() * (z * 0.149).cos() * 3.0;
-    
-    base_y + large_scale + gentle + (bumps * roughness)
-}
 
 // Helper function to calculate angle difference
 fn angle_difference(a: f32, b: f32) -> f32 {
