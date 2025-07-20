@@ -4,6 +4,8 @@ use crate::bullet::Bullet;
 use crate::particle::Particle;
 use crate::mine::Mine;
 use crate::base::Base;
+use crate::tree::Tree;
+use crate::tree_procedural::ProceduralTreeSystem;
 use crate::sounds::SoundSystem;
 
 use super::systems::{CollisionSystem, SpawningSystem, WaveManager, CombatSystem, BaseManager};
@@ -15,6 +17,8 @@ pub struct Game {
     pub particles: Vec<Particle>,
     pub mines: Vec<Mine>,
     pub bases: Vec<Base>,
+    pub trees: Vec<Tree>, // This will be removed once we fully switch to procedural
+    tree_system: ProceduralTreeSystem,
     pub shoot_cooldown: f32,
     pub score: u32,
     pub player_invulnerable_timer: f32,
@@ -23,6 +27,7 @@ pub struct Game {
     pub position_log_timer: f32,
     wave_manager: WaveManager,
     enemy_stats_timer: f32,
+    frame_count: u32,
 }
 
 impl Game {
@@ -34,6 +39,8 @@ impl Game {
             particles: Vec::new(),
             mines: Vec::new(),
             bases: Vec::new(),
+            trees: Vec::new(),
+            tree_system: ProceduralTreeSystem::new(),
             shoot_cooldown: 0.0,
             score: 0,
             player_invulnerable_timer: 0.0,
@@ -42,6 +49,7 @@ impl Game {
             position_log_timer: 0.0,
             wave_manager: WaveManager::new(),
             enemy_stats_timer: 0.0,
+            frame_count: 0,
         };
         
         // Generate initial bases
@@ -51,6 +59,8 @@ impl Game {
     }
 
     pub fn update(&mut self, left: bool, right: bool, forward: bool, backward: bool, shoot: bool, boost: bool, up: bool, down: bool, dt: f32, sound_system: &mut SoundSystem) {
+        self.frame_count += 1;
+        
         // Update player
         self.player.update(left, right, forward, backward, boost, up, down, dt);
         
@@ -382,5 +392,22 @@ impl Game {
         }
         
         println!("====================================\n");
+    }
+    
+    
+    pub fn update_trees(&mut self) {
+        // Use procedural generation - trees are generated on demand
+        let start_time = std::time::Instant::now();
+        self.trees = self.tree_system.generate_visible_trees(self.player.pos);
+        let elapsed = start_time.elapsed();
+        
+        // Log performance occasionally
+        if self.frame_count % 60 == 0 {
+            println!("Trees: {} generated in {:?}", self.trees.len(), elapsed);
+        }
+    }
+    
+    pub fn get_visible_trees(&self) -> &[Tree] {
+        &self.trees
     }
 }

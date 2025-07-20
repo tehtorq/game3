@@ -240,4 +240,169 @@ impl<'a> Renderer<'a> {
             self.draw_triangle(base4, base1, spike_tip);
         }
     }
+    
+    pub fn draw_cone(&mut self, base_center: Vec3, radius: f32, height: f32, color: Vec3, segments: i32) {
+        let tip = base_center + Vec3::new(0.0, height, 0.0);
+        
+        // Draw triangular faces
+        for i in 0..segments {
+            let angle1 = i as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            let angle2 = (i + 1) as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            
+            let p1 = base_center + Vec3::new(angle1.cos() * radius, 0.0, angle1.sin() * radius);
+            let p2 = base_center + Vec3::new(angle2.cos() * radius, 0.0, angle2.sin() * radius);
+            
+            self.set_color(color);
+            self.draw_triangle(p1, p2, tip);
+        }
+        
+        // Draw base
+        for i in 0..segments {
+            let angle1 = i as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            let angle2 = (i + 1) as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            
+            let p1 = base_center + Vec3::new(angle1.cos() * radius, 0.0, angle1.sin() * radius);
+            let p2 = base_center + Vec3::new(angle2.cos() * radius, 0.0, angle2.sin() * radius);
+            
+            self.draw_triangle(base_center, p1, p2);
+        }
+    }
+    
+    pub fn draw_cylinder(&mut self, base_center: Vec3, radius: f32, height: f32, color: Vec3, segments: i32) {
+        self.set_color(color);
+        
+        // Draw sides
+        for i in 0..segments {
+            let angle1 = i as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            let angle2 = (i + 1) as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            
+            let p1_bottom = base_center + Vec3::new(angle1.cos() * radius, 0.0, angle1.sin() * radius);
+            let p2_bottom = base_center + Vec3::new(angle2.cos() * radius, 0.0, angle2.sin() * radius);
+            let p1_top = p1_bottom + Vec3::new(0.0, height, 0.0);
+            let p2_top = p2_bottom + Vec3::new(0.0, height, 0.0);
+            
+            self.draw_triangle(p1_bottom, p2_bottom, p1_top);
+            self.draw_triangle(p2_bottom, p2_top, p1_top);
+        }
+        
+        // Draw top and bottom
+        let top_center = base_center + Vec3::new(0.0, height, 0.0);
+        for i in 0..segments {
+            let angle1 = i as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            let angle2 = (i + 1) as f32 * std::f32::consts::PI * 2.0 / segments as f32;
+            
+            let p1 = Vec3::new(angle1.cos() * radius, 0.0, angle1.sin() * radius);
+            let p2 = Vec3::new(angle2.cos() * radius, 0.0, angle2.sin() * radius);
+            
+            // Bottom
+            self.draw_triangle(base_center, base_center + p1, base_center + p2);
+            // Top
+            self.draw_triangle(top_center, top_center + p2, top_center + p1);
+        }
+    }
+    
+    pub fn draw_sphere(&mut self, center: Vec3, radius: f32, color: Vec3, detail: i32) {
+        self.set_color(color);
+        
+        let rings = 4 + detail * 2;
+        let sectors = 6 + detail * 3;
+        
+        for r in 0..rings {
+            let r0 = std::f32::consts::PI * r as f32 / rings as f32;
+            let r1 = std::f32::consts::PI * (r + 1) as f32 / rings as f32;
+            let y0 = radius * r0.cos();
+            let y1 = radius * r1.cos();
+            let r0_sin = r0.sin();
+            let r1_sin = r1.sin();
+            
+            for s in 0..sectors {
+                let s0 = 2.0 * std::f32::consts::PI * s as f32 / sectors as f32;
+                let s1 = 2.0 * std::f32::consts::PI * (s + 1) as f32 / sectors as f32;
+                
+                let x00 = radius * r0_sin * s0.cos();
+                let z00 = radius * r0_sin * s0.sin();
+                let x01 = radius * r0_sin * s1.cos();
+                let z01 = radius * r0_sin * s1.sin();
+                let x10 = radius * r1_sin * s0.cos();
+                let z10 = radius * r1_sin * s0.sin();
+                let x11 = radius * r1_sin * s1.cos();
+                let z11 = radius * r1_sin * s1.sin();
+                
+                let p00 = center + Vec3::new(x00, y0, z00);
+                let p01 = center + Vec3::new(x01, y0, z01);
+                let p10 = center + Vec3::new(x10, y1, z10);
+                let p11 = center + Vec3::new(x11, y1, z11);
+                
+                if r != 0 {
+                    self.draw_triangle(p00, p01, p10);
+                }
+                if r != rings - 1 {
+                    self.draw_triangle(p01, p11, p10);
+                }
+            }
+        }
+    }
+    
+    pub fn draw_hemisphere(&mut self, center: Vec3, radius: f32, color: Vec3, detail: i32) {
+        self.set_color(color);
+        
+        let rings = 3 + detail * 2;
+        let sectors = 6 + detail * 3;
+        
+        for r in 0..rings {
+            let r0 = std::f32::consts::PI * 0.5 * r as f32 / rings as f32;
+            let r1 = std::f32::consts::PI * 0.5 * (r + 1) as f32 / rings as f32;
+            let y0 = radius * r0.cos();
+            let y1 = radius * r1.cos();
+            let r0_sin = r0.sin();
+            let r1_sin = r1.sin();
+            
+            for s in 0..sectors {
+                let s0 = 2.0 * std::f32::consts::PI * s as f32 / sectors as f32;
+                let s1 = 2.0 * std::f32::consts::PI * (s + 1) as f32 / sectors as f32;
+                
+                let x00 = radius * r0_sin * s0.cos();
+                let z00 = radius * r0_sin * s0.sin();
+                let x01 = radius * r0_sin * s1.cos();
+                let z01 = radius * r0_sin * s1.sin();
+                let x10 = radius * r1_sin * s0.cos();
+                let z10 = radius * r1_sin * s0.sin();
+                let x11 = radius * r1_sin * s1.cos();
+                let z11 = radius * r1_sin * s1.sin();
+                
+                let p00 = center + Vec3::new(x00, y0, z00);
+                let p01 = center + Vec3::new(x01, y0, z01);
+                let p10 = center + Vec3::new(x10, y1, z10);
+                let p11 = center + Vec3::new(x11, y1, z11);
+                
+                if r != 0 {
+                    self.draw_triangle(p00, p01, p10);
+                }
+                if r != rings - 1 {
+                    self.draw_triangle(p01, p11, p10);
+                }
+            }
+        }
+        
+        // Draw base
+        for s in 0..sectors {
+            let s0 = 2.0 * std::f32::consts::PI * s as f32 / sectors as f32;
+            let s1 = 2.0 * std::f32::consts::PI * (s + 1) as f32 / sectors as f32;
+            
+            let x0 = radius * s0.cos();
+            let z0 = radius * s0.sin();
+            let x1 = radius * s1.cos();
+            let z1 = radius * s1.sin();
+            
+            let p0 = center + Vec3::new(x0, 0.0, z0);
+            let p1 = center + Vec3::new(x1, 0.0, z1);
+            
+            self.draw_triangle(center, p1, p0);
+        }
+    }
+    
+    pub fn set_color(&mut self, _color: Vec3) {
+        // Note: Color is currently set per draw call in the main render loop
+        // This method exists for compatibility but doesn't affect vertex colors
+    }
 }

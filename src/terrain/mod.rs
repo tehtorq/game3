@@ -9,7 +9,7 @@ pub mod cache;
 pub mod height_cache;
 
 // Re-export commonly used items
-pub use generation::height_at;
+pub use generation::{height_at, get_biome_at};
 pub use gpu_complete::TerrainGPUComplete;
 
 // Constants for terrain generation

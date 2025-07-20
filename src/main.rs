@@ -1,6 +1,7 @@
 use miniquad::*;
 use glam::{Vec3, Mat4};
 use std::f32::consts::PI;
+use std::collections::HashMap;
 
 mod math;
 mod vertex;
@@ -25,6 +26,9 @@ mod game;
 mod constants;
 mod sounds;
 mod skybox;
+mod tree;
+mod tree_instanced;
+mod tree_procedural;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
@@ -74,6 +78,10 @@ struct Stage {
     start_time: f64,
     // Skybox
     skybox: skybox::Skybox,
+    // Tree instancing
+    tree_instance_system: tree_instanced::TreeInstancingSystem,
+    tree_pipeline: Pipeline,
+    tree_bindings: HashMap<tree::TreeType, Bindings>,
 }
 
 
@@ -338,6 +346,74 @@ impl Stage {
             index_buffer: bullet_instance_system.index_buffer(),
             images: vec![],
         };
+        
+        // Create tree shader and pipeline
+        let tree_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: crate::shaders::modules::tree::VERTEX_INSTANCED,
+                fragment: crate::shaders::modules::tree::FRAGMENT_INSTANCED,
+            },
+            crate::shaders::modules::tree::meta()
+        ).expect("Failed to create tree shader");
+        
+        let tree_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout {
+                    step_func: VertexStep::PerVertex,
+                    stride: 24, // 6 floats * 4 bytes
+                    ..Default::default()
+                },
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    stride: 28, // 7 floats * 4 bytes (3 pos + 3 scale + 1 rotation)
+                    ..Default::default()
+                }
+            ],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float3),
+                VertexAttribute::new("barycentric", VertexFormat::Float3),
+                VertexAttribute::with_buffer("instance_position", VertexFormat::Float3, 1),
+                VertexAttribute::with_buffer("instance_scale_height", VertexFormat::Float3, 1),
+                VertexAttribute::with_buffer("instance_rotation", VertexFormat::Float1, 1),
+            ],
+            tree_shader,
+            PipelineParams {
+                primitive_type: PrimitiveType::Triangles,
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
+                cull_face: CullFace::Back,
+                ..Default::default()
+            },
+        );
+        
+        // Create tree instance system
+        let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
+        let tree_instance_system = unsafe {
+            tree_instanced::TreeInstancingSystem::new(&mut *ctx_ptr, 2000) // max 2000 trees per type
+        };
+        
+        // Create tree bindings for each tree type
+        let mut tree_bindings = HashMap::new();
+        let tree_types = [
+            tree::TreeType::Pine,
+            tree::TreeType::Oak,
+            tree::TreeType::Palm,
+            tree::TreeType::Crystal,
+            tree::TreeType::Cactus,
+            tree::TreeType::Mushroom,
+            tree::TreeType::Dead,
+        ];
+        
+        for tree_type in &tree_types {
+            if let Some((vertex_buffer, instance_buffer, index_buffer, _)) = 
+                tree_instance_system.get_buffers(*tree_type) {
+                tree_bindings.insert(*tree_type, Bindings {
+                    vertex_buffers: vec![vertex_buffer, instance_buffer],
+                    index_buffer,
+                    images: vec![],
+                });
+            }
+        }
 
         // Create GPUComplete terrain on startup
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
@@ -382,6 +458,9 @@ impl Stage {
             bullet_instance_system,
             start_time: miniquad::date::now(),
             skybox,
+            tree_instance_system,
+            tree_pipeline,
+            tree_bindings,
         };
         
         // Start in fullscreen with mouse captured
@@ -432,6 +511,9 @@ impl EventHandler for Stage {
                 dt,
                 &mut self.sound_system
             );
+            
+            // Update trees based on player position
+            self.game.update_trees();
             
             // Play explosion sounds for destroyed enemies
             let enemies_after = self.game.enemies.len();
@@ -530,6 +612,48 @@ impl EventHandler for Stage {
         // Log terrain performance periodically
         if self.frame_count % 300 == 0 && terrain_triangles > 0 {
             println!("Terrain triangles: {}", terrain_triangles);
+        }
+        
+        // Draw trees using instancing (after terrain, before other objects)
+        {
+            let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
+            let instance_counts = unsafe {
+                self.tree_instance_system.update_instances(&mut *ctx_ptr, &self.game.trees)
+            };
+            
+            // Define colors for each tree type
+            let tree_colors = [
+                (tree::TreeType::Pine, [0.1, 0.4, 0.1]),       // Dark green
+                (tree::TreeType::Oak, [0.2, 0.5, 0.1]),        // Green
+                (tree::TreeType::Palm, [0.2, 0.6, 0.2]),       // Bright green
+                (tree::TreeType::Crystal, [0.6, 0.3, 1.0]),    // Purple
+                (tree::TreeType::Cactus, [0.1, 0.5, 0.1]),     // Green
+                (tree::TreeType::Mushroom, [0.6, 0.1, 0.1]),   // Red
+                (tree::TreeType::Dead, [0.3, 0.2, 0.1]),       // Dark brown
+            ];
+            
+            // Log tree instance counts periodically
+            if self.frame_count % 300 == 0 && !instance_counts.is_empty() {
+                println!("Tree instances: {:?}", instance_counts);
+            }
+            
+            // Render each tree type with its instances
+            for (tree_type, color) in &tree_colors {
+                if let Some(&count) = instance_counts.get(tree_type) {
+                    if count > 0 {
+                        if let Some(bindings) = self.tree_bindings.get(tree_type) {
+                            self.ctx.apply_pipeline(&self.tree_pipeline);
+                            self.ctx.apply_bindings(bindings);
+                            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, *color)));
+                            
+                            if let Some((_, _, _, index_count)) = 
+                                self.tree_instance_system.get_buffers(*tree_type) {
+                                self.ctx.draw(0, index_count, count);
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         // Draw bases first (in red/orange)

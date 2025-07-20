@@ -69,6 +69,13 @@ fn get_biome_at_simple(p: Vec2) -> Biome {
     }
 }
 
+// Public interface for getting biome at a position
+pub fn get_biome_at(x: f32, z: f32) -> Biome {
+    // For now, use the simple biome selection
+    // In the future, this could use a BiomeMap instance
+    get_biome_at_simple(Vec2::new(x, z))
+}
+
 // Get height for a specific biome
 fn get_biome_height(p: Vec2, biome: Biome) -> f32 {
     match biome {
