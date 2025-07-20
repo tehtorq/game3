@@ -131,7 +131,7 @@ impl Player {
         
         const THRUST_POWER: f32 = 800.0;    // Forward thrust power
         const STRAFE_POWER: f32 = 450.0;    // Lateral thrust power (reduced to 75% of 600)
-        const BOOST_MULTIPLIER: f32 = 2.5;  // Speed boost when holding shift
+        const BOOST_MULTIPLIER: f32 = 10.0;  // Speed boost when holding shift (4x original)
         
         const AIR_DRAG: f32 = 1.0;          // Much lower drag for more momentum
         const HOVER_DRAG: f32 = 1.5;        // Very low drag when not thrusting for long coasting
@@ -251,10 +251,16 @@ impl Player {
         // Apply gravity - DISABLED
         // self.vel.y -= GRAVITY * dt;
         
-        // Limit speeds
+        // Limit speeds - allow higher speed when boosting
+        let effective_max_speed = if boost && forward_component > 0.0 {
+            MAX_SPEED * BOOST_MULTIPLIER
+        } else {
+            MAX_SPEED
+        };
+        
         let horizontal_speed = Vec3::new(self.vel.x, 0.0, self.vel.z).length();
-        if horizontal_speed > MAX_SPEED {
-            let scale = MAX_SPEED / horizontal_speed;
+        if horizontal_speed > effective_max_speed {
+            let scale = effective_max_speed / horizontal_speed;
             self.vel.x *= scale;
             self.vel.z *= scale;
         }
