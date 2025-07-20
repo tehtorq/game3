@@ -19,6 +19,7 @@ mod hud;
 mod base;
 mod camera;
 mod shader;
+mod shaders;
 mod shader_volumetric_laser;
 mod game;
 mod constants;
@@ -105,8 +106,8 @@ impl Stage {
         // Create simple terrain shader for CPU-based chunks
         let terrain_simple_shader = match ctx.new_shader(
             ShaderSource::Glsl {
-                vertex: shader::VERTEX_TERRAIN_SIMPLE,
-                fragment: shader::FRAGMENT_TERRAIN_SIMPLE,
+                vertex: &*shader::VERTEX_TERRAIN_SIMPLE,
+                fragment: &*shader::FRAGMENT_TERRAIN_SIMPLE,
             },
             shader::meta_terrain_simple()
         ) {
