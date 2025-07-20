@@ -16,10 +16,36 @@ pub fn height_at(x: f32, z: f32) -> f32 {
 
 // Get blended height combining multiple biomes
 fn get_blended_biome_height(p: Vec2) -> f32 {
-    // For now, use a simple biome mapping based on position
-    // In a real implementation, this would use the BiomeMap
+    // Get base biome height
     let biome = get_biome_at_simple(p);
-    get_biome_height(p, biome)
+    let base_height = get_biome_height(p, biome);
+    
+    // Add continental scale height variation
+    let continental = get_continental_height(p);
+    
+    // Different biomes react differently to continental features
+    let biome_noise = (p.x * 0.0003).sin() * (p.y * 0.0003).cos() * 0.5 + 
+                     (p.x * 0.0007 + 1.3).sin() * (p.y * 0.0006 - 0.7).sin() * 0.3;
+    
+    let continental_influence = match biome {
+        Biome::Mountains | Biome::Canyon => 1.5,  // Strong influence
+        Biome::Arctic | Biome::Volcanic => 2.0,   // Very strong influence
+        Biome::Plains | Biome::Desert => 0.7,     // Weaker influence
+        _ => 1.0,                                  // Normal influence
+    };
+    
+    // Add medium-scale fractal noise
+    let mut fractal_noise = 0.0;
+    let mut amplitude = 60.0;
+    let mut frequency = 0.0005;
+    for _ in 0..5 {
+        fractal_noise += (p.x * frequency).sin() * (p.y * frequency).cos() * amplitude;
+        fractal_noise += (p.x * frequency * 1.7 + 100.0).sin() * (p.y * frequency * 1.7 + 100.0).cos() * amplitude * 0.7;
+        amplitude *= 0.45;
+        frequency *= 2.3;
+    }
+    
+    base_height + fractal_noise + continental * continental_influence
 }
 
 // Simple biome selection based on position

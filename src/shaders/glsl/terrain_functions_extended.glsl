@@ -365,10 +365,8 @@ float get_blended_biome_height_extended(vec2 p) {
         frequency *= 2.3;
     }
     
-    // Larger scale continental features
-    float continent_scale = 0.0001; // Even larger scale
-    float continental = (sin(p.x * continent_scale) * cos(p.y * continent_scale * 0.8) + 
-                        cos(p.x * continent_scale * 0.3) * sin(p.y * continent_scale * 1.2)) * 120.0; // More dramatic
+    // Use the same continental height function from basic terrain
+    float continental = get_continental_height(p);
     
     // Erosion simulation - smooth out steep areas
     float slope_factor = abs(sin(p.x * 0.005) - sin(p.x * 0.005 + 1.0)) + 
@@ -386,5 +384,19 @@ float get_blended_biome_height_extended(vec2 p) {
     float terrace_influence = clamp(sin(p.x * 0.001 + p.y * 0.0008) * 0.5 + 0.5, 0.0, 1.0) * 0.2; // Max 20% terrace influence
     float height = terraced * terrace_influence + primary_height * (1.0 - terrace_influence);
     
-    return height + fractal_noise + continental * (1.0 - erosion);
+    // Apply stronger continental influence for extended biomes
+    float biome_noise = sin(p.x * 0.0003) * cos(p.y * 0.0003) * 0.5 + 
+                       sin(p.x * 0.0007 + 1.3) * sin(p.y * 0.0006 - 0.7) * 0.3;
+    
+    // Different biomes react differently to continental features
+    float continental_influence = 1.0;
+    if (biome_noise < -0.7 || biome_noise > 0.8) {
+        continental_influence = 2.0; // Very strong in extreme biomes
+    } else if (biome_noise < -0.3 || biome_noise > 0.5) {
+        continental_influence = 1.5; // Strong in mountains/canyons
+    } else if (abs(biome_noise) < 0.1) {
+        continental_influence = 0.7; // Weaker in plains
+    }
+    
+    return height + fractal_noise + continental * continental_influence * (1.0 - erosion);
 }

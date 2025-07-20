@@ -163,6 +163,56 @@ vec3 get_biome_color(vec2 p, float height) {
     return color;
 }
 
+// Large-scale continental height variation
+float get_continental_height(vec2 p) {
+    // Multiple layers of very large scale features
+    
+    // Mega-continental scale - planet-wide features
+    float mega_scale = 0.000025; // 4x larger scale for massive features
+    float mega1 = sin(p.x * mega_scale + 5000.0) * cos(p.y * mega_scale * 0.6 - 3000.0);
+    float mega2 = cos(p.x * mega_scale * 0.7 + 2000.0) * sin(p.y * mega_scale * 0.9 + 4000.0);
+    
+    // Create massive continental bulges and depressions
+    float mega_height = (mega1 * 0.6 + mega2 * 0.4) * 350.0;
+    
+    // Super-continental scale - massive tectonic plates
+    float tectonic_scale = 0.00005;
+    float tectonic1 = sin(p.x * tectonic_scale + 1000.0) * cos(p.y * tectonic_scale * 0.7);
+    float tectonic2 = cos(p.x * tectonic_scale * 0.8 - 500.0) * sin(p.y * tectonic_scale * 1.1 + 300.0);
+    float tectonic3 = sin(p.x * tectonic_scale * 0.6 + p.y * tectonic_scale * 0.4);
+    
+    // Create distinct continental masses with smooth transitions
+    float continental_mass = (tectonic1 * 0.5 + tectonic2 * 0.3 + tectonic3 * 0.2);
+    
+    // Add mountain ranges along "plate boundaries"
+    float boundary_sharpness = 8.0;
+    float plate_boundary = pow(abs(sin(p.x * tectonic_scale * 2.0 + p.y * tectonic_scale)), boundary_sharpness) * 150.0;
+    
+    // Large-scale basins and highlands
+    float basin_scale = 0.00008;
+    float basin1 = smoothstep(-0.3, 0.3, sin(p.x * basin_scale) * cos(p.y * basin_scale * 0.9)) * 250.0;
+    float basin2 = smoothstep(-0.4, 0.4, cos(p.x * basin_scale * 1.2 + 2000.0) * sin(p.y * basin_scale * 0.8 - 1000.0)) * 200.0;
+    
+    // Continental shelves and ocean depths
+    float shelf_pattern = smoothstep(-0.2, 0.2, continental_mass);
+    float ocean_depth = (1.0 - shelf_pattern) * -300.0;
+    
+    // Massive rift valleys and oceanic trenches
+    float rift_scale = 0.00003;
+    float rift1 = abs(sin(p.x * rift_scale + p.y * rift_scale * 0.3)) < 0.1 ? -200.0 : 0.0;
+    float rift2 = abs(cos(p.x * rift_scale * 0.8 - p.y * rift_scale * 0.5 + 1500.0)) < 0.08 ? -250.0 : 0.0;
+    
+    // Combine all continental features
+    float continental_height = mega_height +                    // Planet-scale features
+                              continental_mass * 200.0 +       // Base continental elevation
+                              plate_boundary +                 // Mountain ranges at boundaries
+                              basin1 - basin2 * 0.5 +         // Basins and highlands
+                              ocean_depth +                    // Deep ocean areas
+                              min(rift1, rift2);              // Deep rifts and trenches
+    
+    return continental_height;
+}
+
 // Smooth blending between biomes
 float get_blended_biome_height(vec2 p) {
     float sample_dist = 100.0;
@@ -174,7 +224,7 @@ float get_blended_biome_height(vec2 p) {
     
     float primary_height = (h_center * 3.0 + h_north + h_south + h_east + h_west) / 7.0;
     
-    // Fractal noise
+    // Fractal noise for medium-scale detail
     float fractal_noise = 0.0;
     float amplitude = 60.0;
     float frequency = 0.0005;
@@ -185,9 +235,19 @@ float get_blended_biome_height(vec2 p) {
         frequency *= 2.3;
     }
     
-    float continent_scale = 0.0001;
-    float continental = (sin(p.x * continent_scale) * cos(p.y * continent_scale * 0.8) + 
-                        cos(p.x * continent_scale * 0.3) * sin(p.y * continent_scale * 1.2)) * 120.0;
+    // Get large-scale continental height variation
+    float continental = get_continental_height(p);
     
-    return primary_height + fractal_noise + continental;
+    // Apply continental modulation to biome heights
+    // Continental features have more influence in certain biomes
+    float biome_noise = sin(p.x * 0.0003) * cos(p.y * 0.0003) * 0.5 + 
+                       sin(p.x * 0.0007 + 1.3) * sin(p.y * 0.0006 - 0.7) * 0.3;
+    
+    // Mountains and canyons are more affected by continental features
+    float continental_influence = 1.0;
+    if (biome_noise < -0.3 || biome_noise > 0.5) {
+        continental_influence = 1.5; // Stronger influence in extreme biomes
+    }
+    
+    return primary_height + fractal_noise + continental * continental_influence;
 }

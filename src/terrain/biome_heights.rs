@@ -512,3 +512,49 @@ pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
+
+// Large-scale continental height variation
+pub fn get_continental_height(p: Vec2) -> f32 {
+    // Mega-continental scale - planet-wide features
+    let mega_scale = 0.000025;
+    let mega1 = (p.x * mega_scale + 5000.0).sin() * (p.y * mega_scale * 0.6 - 3000.0).cos();
+    let mega2 = (p.x * mega_scale * 0.7 + 2000.0).cos() * (p.y * mega_scale * 0.9 + 4000.0).sin();
+    
+    // Create massive continental bulges and depressions
+    let mega_height = (mega1 * 0.6 + mega2 * 0.4) * 350.0;
+    
+    // Super-continental scale - massive tectonic plates
+    let tectonic_scale = 0.00005;
+    let tectonic1 = (p.x * tectonic_scale + 1000.0).sin() * (p.y * tectonic_scale * 0.7).cos();
+    let tectonic2 = (p.x * tectonic_scale * 0.8 - 500.0).cos() * (p.y * tectonic_scale * 1.1 + 300.0).sin();
+    let tectonic3 = (p.x * tectonic_scale * 0.6 + p.y * tectonic_scale * 0.4).sin();
+    
+    // Create distinct continental masses with smooth transitions
+    let continental_mass = tectonic1 * 0.5 + tectonic2 * 0.3 + tectonic3 * 0.2;
+    
+    // Add mountain ranges along "plate boundaries"
+    let boundary_sharpness = 8.0;
+    let plate_boundary = (p.x * tectonic_scale * 2.0 + p.y * tectonic_scale).sin().abs().powf(boundary_sharpness) * 150.0;
+    
+    // Large-scale basins and highlands
+    let basin_scale = 0.00008;
+    let basin1 = smoothstep(-0.3, 0.3, (p.x * basin_scale).sin() * (p.y * basin_scale * 0.9).cos()) * 250.0;
+    let basin2 = smoothstep(-0.4, 0.4, (p.x * basin_scale * 1.2 + 2000.0).cos() * (p.y * basin_scale * 0.8 - 1000.0).sin()) * 200.0;
+    
+    // Continental shelves and ocean depths
+    let shelf_pattern = smoothstep(-0.2, 0.2, continental_mass);
+    let ocean_depth = (1.0 - shelf_pattern) * -300.0;
+    
+    // Massive rift valleys and oceanic trenches
+    let rift_scale = 0.00003;
+    let rift1: f32 = if (p.x * rift_scale + p.y * rift_scale * 0.3).sin().abs() < 0.1 { -200.0 } else { 0.0 };
+    let rift2: f32 = if (p.x * rift_scale * 0.8 - p.y * rift_scale * 0.5 + 1500.0).cos().abs() < 0.08 { -250.0 } else { 0.0 };
+    
+    // Combine all continental features
+    mega_height +                    // Planet-scale features
+    continental_mass * 200.0 +       // Base continental elevation
+    plate_boundary +                 // Mountain ranges at boundaries
+    basin1 - basin2 * 0.5 +         // Basins and highlands
+    ocean_depth +                    // Deep ocean areas
+    rift1.min(rift2)                // Deep rifts and trenches
+}
