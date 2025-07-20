@@ -66,7 +66,7 @@ impl Game {
         self.shoot_cooldown -= dt;
         
         // Update bases based on distance
-        const BASE_ACTIVE_RANGE: f32 = 3500.0;  // Range for base activity
+        const BASE_ACTIVE_RANGE: f32 = 17500.0;  // Range for base activity (5x increase)
         
         let mut turret_bullets = Vec::new();
         let mut spawn_events = Vec::new();
@@ -173,8 +173,8 @@ impl Game {
         let mut carrier_spawns = Vec::new();
         
         // Only fully update enemies within active range
-        const ACTIVE_RANGE: f32 = 3000.0;  // Full AI updates
-        const SIMPLE_RANGE: f32 = 5000.0;  // Simple updates only
+        const ACTIVE_RANGE: f32 = 15000.0;  // Full AI updates (5x increase)
+        const SIMPLE_RANGE: f32 = 25000.0;  // Simple updates only (5x increase)
         
         for (i, enemy) in self.enemies.iter_mut().enumerate() {
             let distance_to_player = (enemy.pos - self.player.pos).length();
@@ -325,8 +325,8 @@ impl Game {
         }
         
         // Count active vs inactive enemies
-        const ACTIVE_RANGE: f32 = 3000.0;
-        const SIMPLE_RANGE: f32 = 5000.0;
+        const ACTIVE_RANGE: f32 = 15000.0;  // 5x increase
+        const SIMPLE_RANGE: f32 = 25000.0;  // 5x increase
         let mut active_enemies = 0;
         let mut simple_enemies = 0;
         let mut frozen_enemies = 0;
@@ -343,7 +343,7 @@ impl Game {
         }
         
         // Count active bases
-        const BASE_ACTIVE_RANGE: f32 = 3500.0;
+        const BASE_ACTIVE_RANGE: f32 = 17500.0;  // 5x increase
         let active_bases = self.bases.iter()
             .filter(|b| b.is_active && (b.pos - self.player.pos).length() < BASE_ACTIVE_RANGE)
             .count();

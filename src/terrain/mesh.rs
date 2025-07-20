@@ -2,7 +2,6 @@ use miniquad::*;
 use glam::Vec2;
 use crate::vertex::Vertex;
 use crate::biome::{BiomeMap, Biome};
-use super::generation::height_at;
 use super::biome_heights::smoothstep;
 use crate::constants::*;
 

@@ -1,11 +1,9 @@
-use std::f32::consts::PI;
 #[cfg(feature = "audio")]
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 #[cfg(feature = "audio")]
 use std::sync::{Arc, Mutex};
 
 pub mod thruster;
-pub use thruster::ThrusterSound;
 
 #[cfg(feature = "audio")]
 pub mod thruster_source;

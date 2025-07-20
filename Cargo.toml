@@ -17,6 +17,3 @@ image = "0.24"
 rodio = { version = "0.19", optional = true }
 lazy_static = "1.4"
 
-[[bin]]
-name = "test_audio"
-path = "src/test_audio.rs"

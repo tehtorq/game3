@@ -23,9 +23,6 @@ mod shader_volumetric_laser;
 mod game;
 mod constants;
 mod sounds;
-mod app;
-mod graphics;
-mod input;
 mod skybox;
 
 use vertex::Vertex;
@@ -52,13 +49,11 @@ struct Stage {
     bullet_glow_pipeline: Pipeline,
     volumetric_laser_pipeline: Pipeline,
     bindings: Bindings,
-    terrain_bindings: Bindings,
     bullet_bindings: Bindings,
     game: Game,
     camera: Camera,
     input: InputState,
     paused: bool,
-    terrain_gpu_rings: Option<terrain::TerrainGPURings>,
     terrain_gpu_complete: Option<terrain::TerrainGPUComplete>,
     terrain_simple_pipeline: Pipeline,
     hud: HUD,
@@ -326,11 +321,6 @@ impl Stage {
             BufferUsage::Stream,
             BufferSource::empty::<u32>(1)
         );
-        let terrain_bindings = Bindings {
-            vertex_buffers: vec![],
-            index_buffer: dummy_buffer,
-            images: vec![],
-        };
         
         // Create bullet instance system with a reasonable max bullet count
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
@@ -361,7 +351,6 @@ impl Stage {
         }
         
         // GPU terrain alternatives
-        let terrain_gpu_rings = None;
         let terrain_gpu_complete = Some(terrain_gpu_complete);
         
         // Create skybox before moving ctx
@@ -376,13 +365,11 @@ impl Stage {
             bullet_glow_pipeline,
             volumetric_laser_pipeline,
             bindings,
-            terrain_bindings,
             bullet_bindings,
             game: Game::new(),
             camera: Camera::new(),
             input: InputState::default(),
             paused: false,
-            terrain_gpu_rings,
             terrain_gpu_complete,
             hud: HUD::new(),
             frame_count: 0,

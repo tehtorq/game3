@@ -4,7 +4,6 @@ use crate::vertex::Vertex;
 use crate::shader::UniformsTerrainGPU;
 use super::cache::TerrainCache;
 use super::mesh::Terrain;
-use crate::constants::*;
 
 // Complete GPU terrain with texture support
 pub struct TerrainGPUComplete {

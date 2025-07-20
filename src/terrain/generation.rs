@@ -2,7 +2,7 @@
 // Central location for all terrain height calculations
 
 use glam::Vec2;
-use crate::biome::{Biome, BiomeMap};
+use crate::biome::Biome;
 use super::biome_heights::*;
 
 // Public interface for terrain height calculation
