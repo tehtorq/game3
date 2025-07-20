@@ -19,6 +19,7 @@ pub struct Game {
     pub bases: Vec<Base>,
     pub trees: Vec<Tree>, // This will be removed once we fully switch to procedural
     tree_system: ProceduralTreeSystem,
+    tree_update_timer: f32,  // Timer for updating trees once per second
     pub shoot_cooldown: f32,
     pub score: u32,
     pub player_invulnerable_timer: f32,
@@ -41,6 +42,7 @@ impl Game {
             bases: Vec::new(),
             trees: Vec::new(),
             tree_system: ProceduralTreeSystem::new(),
+            tree_update_timer: 0.0,  // Initialize tree update timer
             shoot_cooldown: 0.0,
             score: 0,
             player_invulnerable_timer: 0.0,
@@ -395,14 +397,20 @@ impl Game {
     }
     
     
-    pub fn update_trees(&mut self) {
-        // Use procedural generation - trees are generated on demand
-        let start_time = std::time::Instant::now();
-        self.trees = self.tree_system.generate_visible_trees(self.player.pos);
-        let elapsed = start_time.elapsed();
+    pub fn update_trees(&mut self, dt: f32) {
+        // Only update trees once per second to improve performance
+        self.tree_update_timer -= dt;
         
-        // Log performance occasionally
-        if self.frame_count % 60 == 0 {
+        if self.tree_update_timer <= 0.0 {
+            // Reset timer
+            self.tree_update_timer = 1.0; // Update every second
+            
+            // Use procedural generation - trees are generated on demand
+            let start_time = std::time::Instant::now();
+            self.trees = self.tree_system.generate_visible_trees(self.player.pos);
+            let elapsed = start_time.elapsed();
+            
+            // Log performance
             println!("Trees: {} generated in {:?}", self.trees.len(), elapsed);
         }
     }

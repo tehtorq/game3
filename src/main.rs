@@ -389,7 +389,7 @@ impl Stage {
         // Create tree instance system
         let ctx_ptr = &mut *ctx as *mut dyn RenderingBackend;
         let tree_instance_system = unsafe {
-            tree_instanced::TreeInstancingSystem::new(&mut *ctx_ptr, 2000) // max 2000 trees per type
+            tree_instanced::TreeInstancingSystem::new(&mut *ctx_ptr, 3000) // max 3000 trees per type for increased view distance
         };
         
         // Create tree bindings for each tree type
@@ -513,7 +513,7 @@ impl EventHandler for Stage {
             );
             
             // Update trees based on player position
-            self.game.update_trees();
+            self.game.update_trees(dt);
             
             // Play explosion sounds for destroyed enemies
             let enemies_after = self.game.enemies.len();

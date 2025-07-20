@@ -6,7 +6,7 @@ use crate::terrain;
 pub struct ProceduralTreeSystem {
     chunk_size: f32,
     tree_spacing: f32,
-    view_distance: f32,
+    chunks_radius: i32,  // Number of chunks to generate in each direction from player
 }
 
 impl ProceduralTreeSystem {
@@ -14,70 +14,36 @@ impl ProceduralTreeSystem {
         Self {
             chunk_size: 512.0,      // Larger chunks for fewer iterations
             tree_spacing: 60.0,     // Slightly more spacing to reduce tree count
-            view_distance: 2500.0,  // Reduced view distance for performance
+            chunks_radius: 10,      // Generate trees for 10 chunks in each direction (5120m radius)
         }
     }
     
     /// Generate all trees visible from the given position
     pub fn generate_visible_trees(&self, viewer_pos: Vec3) -> Vec<Tree> {
-        let mut trees = Vec::with_capacity(2000); // Pre-allocate for performance
+        let mut trees = Vec::with_capacity(3000); // Pre-allocate for performance
         
-        // Calculate chunk bounds
-        let min_chunk_x = ((viewer_pos.x - self.view_distance) / self.chunk_size).floor() as i32;
-        let max_chunk_x = ((viewer_pos.x + self.view_distance) / self.chunk_size).ceil() as i32;
-        let min_chunk_z = ((viewer_pos.z - self.view_distance) / self.chunk_size).floor() as i32;
-        let max_chunk_z = ((viewer_pos.z + self.view_distance) / self.chunk_size).ceil() as i32;
+        // Profiling
+        let start_time = std::time::Instant::now();
+        let mut terrain_queries = 0u32;
+        let mut positions_checked = 0u32;
         
-        // Process chunks in spiral order from center outward
-        let center_chunk_x = (viewer_pos.x / self.chunk_size).round() as i32;
-        let center_chunk_z = (viewer_pos.z / self.chunk_size).round() as i32;
+        // Get the chunk the viewer is in
+        let center_chunk_x = (viewer_pos.x / self.chunk_size).floor() as i32;
+        let center_chunk_z = (viewer_pos.z / self.chunk_size).floor() as i32;
         
-        // First add trees from center chunk
-        let chunk_trees = self.generate_trees_for_chunk(center_chunk_x, center_chunk_z, viewer_pos);
-        trees.extend(chunk_trees);
-        
-        // Then spiral outward
-        let max_radius = ((max_chunk_x - min_chunk_x).max(max_chunk_z - min_chunk_z) / 2) + 1;
-        
-        for radius in 1..=max_radius {
-            // Top edge
-            for x in -radius..=radius {
-                let chunk_x = center_chunk_x + x;
-                let chunk_z = center_chunk_z - radius;
-                if chunk_x >= min_chunk_x && chunk_x <= max_chunk_x && chunk_z >= min_chunk_z && chunk_z <= max_chunk_z {
-                    let chunk_trees = self.generate_trees_for_chunk(chunk_x, chunk_z, viewer_pos);
-                    trees.extend(chunk_trees);
+        // Generate trees for all chunks within radius
+        for dx in -self.chunks_radius..=self.chunks_radius {
+            for dz in -self.chunks_radius..=self.chunks_radius {
+                // Skip chunks outside the circular radius
+                if dx * dx + dz * dz > self.chunks_radius * self.chunks_radius {
+                    continue;
                 }
-            }
-            
-            // Right edge
-            for z in -radius + 1..=radius {
-                let chunk_x = center_chunk_x + radius;
-                let chunk_z = center_chunk_z + z;
-                if chunk_x >= min_chunk_x && chunk_x <= max_chunk_x && chunk_z >= min_chunk_z && chunk_z <= max_chunk_z {
-                    let chunk_trees = self.generate_trees_for_chunk(chunk_x, chunk_z, viewer_pos);
-                    trees.extend(chunk_trees);
-                }
-            }
-            
-            // Bottom edge
-            for x in (-radius..radius).rev() {
-                let chunk_x = center_chunk_x + x;
-                let chunk_z = center_chunk_z + radius;
-                if chunk_x >= min_chunk_x && chunk_x <= max_chunk_x && chunk_z >= min_chunk_z && chunk_z <= max_chunk_z {
-                    let chunk_trees = self.generate_trees_for_chunk(chunk_x, chunk_z, viewer_pos);
-                    trees.extend(chunk_trees);
-                }
-            }
-            
-            // Left edge
-            for z in (-radius + 1..radius).rev() {
-                let chunk_x = center_chunk_x - radius;
-                let chunk_z = center_chunk_z + z;
-                if chunk_x >= min_chunk_x && chunk_x <= max_chunk_x && chunk_z >= min_chunk_z && chunk_z <= max_chunk_z {
-                    let chunk_trees = self.generate_trees_for_chunk(chunk_x, chunk_z, viewer_pos);
-                    trees.extend(chunk_trees);
-                }
+                
+                let chunk_x = center_chunk_x + dx;
+                let chunk_z = center_chunk_z + dz;
+                
+                let chunk_trees = self.generate_trees_for_chunk(chunk_x, chunk_z, viewer_pos);
+                trees.extend(chunk_trees);
             }
         }
         
@@ -91,27 +57,21 @@ impl ProceduralTreeSystem {
         let chunk_world_x = chunk_x as f32 * self.chunk_size;
         let chunk_world_z = chunk_z as f32 * self.chunk_size;
         
-        // Early chunk culling - check if chunk center is in range
-        let chunk_center_x = chunk_world_x + self.chunk_size * 0.5;
-        let chunk_center_z = chunk_world_z + self.chunk_size * 0.5;
-        let dx = chunk_center_x - viewer_pos.x;
-        let dz = chunk_center_z - viewer_pos.z;
-        let chunk_dist_sq = dx * dx + dz * dz;
-        
-        // Skip entire chunk if too far (with some margin for chunk size)
-        let max_dist = self.view_distance + self.chunk_size;
-        if chunk_dist_sq > max_dist * max_dist {
-            return trees;
-        }
-        
         // Use chunk coordinates as seed for deterministic generation
         let chunk_seed = hash_coords(chunk_x, chunk_z);
         
         // Grid within chunk
         let trees_per_chunk = (self.chunk_size / self.tree_spacing) as i32;
         
+        // Early random rejection based on chunk to reduce positions checked
+        let chunk_density = pseudo_random(chunk_seed.wrapping_add(12345)) * 0.5 + 0.5; // 0.5 to 1.0
+        
         for local_x in 0..trees_per_chunk {
             for local_z in 0..trees_per_chunk {
+                // Skip some positions based on chunk density
+                if pseudo_random(hash_coords(local_x * 7, local_z * 11).wrapping_add(chunk_seed)) > chunk_density {
+                    continue;
+                }
                 // Calculate tree position with jitter
                 let base_x = chunk_world_x + local_x as f32 * self.tree_spacing;
                 let base_z = chunk_world_z + local_z as f32 * self.tree_spacing;
@@ -127,24 +87,20 @@ impl ProceduralTreeSystem {
                 let tree_x = base_x + jitter_x;
                 let tree_z = base_z + jitter_z;
                 
-                // Check distance to viewer for culling
+                // Check distance to viewer for LOD only (not culling since chunks are pre-selected)
                 let dx = tree_x - viewer_pos.x;
                 let dz = tree_z - viewer_pos.z;
                 let dist_sq = dx * dx + dz * dz;
-                
-                if dist_sq > self.view_distance * self.view_distance {
-                    continue;
-                }
+                let dist = dist_sq.sqrt();
                 
                 // LOD: Skip some trees at distance
-                let dist = dist_sq.sqrt();
-                if dist > 1500.0 {
+                if dist > 3000.0 {
                     // Skip 50% of distant trees
                     let skip_seed = hash_coords(local_x * 13, local_z * 17);
                     if pseudo_random(skip_seed) < 0.5 {
                         continue;
                     }
-                } else if dist > 2000.0 {
+                } else if dist > 4000.0 {
                     // Skip 75% of very distant trees
                     let skip_seed = hash_coords(local_x * 13, local_z * 17);
                     if pseudo_random(skip_seed) < 0.75 {
@@ -153,7 +109,10 @@ impl ProceduralTreeSystem {
                 }
                 
                 // Determine if tree should spawn here
-                if let Some(tree) = self.should_spawn_tree_at(tree_x, tree_z, chunk_seed + local_x + local_z * 100) {
+                // Only check slope for trees within 1000m to save performance
+                let check_slope = dist < 1000.0;
+                let tree_seed = chunk_seed.wrapping_add(local_x).wrapping_add(local_z.wrapping_mul(100));
+                if let Some(tree) = self.should_spawn_tree_at(tree_x, tree_z, tree_seed, check_slope) {
                     trees.push(tree);
                 }
             }
@@ -163,7 +122,7 @@ impl ProceduralTreeSystem {
     }
     
     /// Determine if a tree should spawn at the given position
-    fn should_spawn_tree_at(&self, x: f32, z: f32, seed: i32) -> Option<Tree> {
+    fn should_spawn_tree_at(&self, x: f32, z: f32, seed: i32, check_slope: bool) -> Option<Tree> {
         // Get terrain height
         let height = terrain::height_at(x, z);
         
@@ -172,31 +131,34 @@ impl ProceduralTreeSystem {
             return None;
         }
         
-        // Calculate slope
-        let delta = 5.0;
-        let h_n = terrain::height_at(x, z + delta);
-        let h_s = terrain::height_at(x, z - delta);
-        let h_e = terrain::height_at(x + delta, z);
-        let h_w = terrain::height_at(x - delta, z);
-        let slope = ((h_n - h_s).abs() + (h_e - h_w).abs()) / (2.0 * delta);
-        
-        // Don't spawn on steep slopes
-        if slope > 0.5 {
-            return None;
+        // Only check slope for nearby trees to save performance
+        if check_slope {
+            // Calculate slope
+            let delta = 5.0;
+            let h_n = terrain::height_at(x, z + delta);
+            let h_s = terrain::height_at(x, z - delta);
+            let h_e = terrain::height_at(x + delta, z);
+            let h_w = terrain::height_at(x - delta, z);
+            let slope = ((h_n - h_s).abs() + (h_e - h_w).abs()) / (2.0 * delta);
+            
+            // Don't spawn on steep slopes
+            if slope > 0.5 {
+                return None;
+            }
         }
         
         // Get biome
         let biome = terrain::get_biome_at(x, z);
         
-        // Determine spawn chance based on biome
+        // Determine spawn chance based on biome (reduced for performance with increased view distance)
         let spawn_chance = match biome {
-            crate::biome::Biome::Plains => 0.3,
-            crate::biome::Biome::Mountains => 0.2,
-            crate::biome::Biome::Arctic => 0.15,
-            crate::biome::Biome::Desert => 0.05,
-            crate::biome::Biome::Swamp => 0.4,
-            crate::biome::Biome::Crystalline => 0.1,
-            crate::biome::Biome::Badlands => 0.05,
+            crate::biome::Biome::Plains => 0.2,      // was 0.3
+            crate::biome::Biome::Mountains => 0.15,  // was 0.2
+            crate::biome::Biome::Arctic => 0.1,      // was 0.15
+            crate::biome::Biome::Desert => 0.03,     // was 0.05
+            crate::biome::Biome::Swamp => 0.25,      // was 0.4
+            crate::biome::Biome::Crystalline => 0.07, // was 0.1
+            crate::biome::Biome::Badlands => 0.03,   // was 0.05
             _ => 0.0,
         };
         
