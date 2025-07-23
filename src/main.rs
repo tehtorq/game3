@@ -29,6 +29,8 @@ mod skybox;
 mod tree;
 mod tree_instanced;
 mod tree_procedural;
+mod postfx;
+use postfx::combined_manager::CombinedEffectsManager;
 
 use vertex::Vertex;
 use renderer::{Renderer, RenderMode, Drawable};
@@ -82,6 +84,7 @@ struct Stage {
     tree_instance_system: tree_instanced::TreeInstancingSystem,
     tree_pipeline: Pipeline,
     tree_bindings: HashMap<tree::TreeType, Bindings>,
+    effects_manager: CombinedEffectsManager,
 }
 
 
@@ -433,6 +436,8 @@ impl Stage {
         // Create skybox before moving ctx
         let skybox = skybox::Skybox::new(&mut *ctx);
         
+        let effects_manager = CombinedEffectsManager::new(&mut *ctx);
+        
         let stage = Self {
             ctx,
             line_pipeline,
@@ -461,6 +466,7 @@ impl Stage {
             tree_instance_system,
             tree_pipeline,
             tree_bindings,
+            effects_manager,
         };
         
         // Start in fullscreen with mouse captured
@@ -472,6 +478,8 @@ impl Stage {
         println!("\n=== Terrain Rendering System ===");
         println!("GPUComplete terrain mode active - Full GPU terrain with biomes");
         println!("================================\n");
+        
+        
         
         stage
     }
@@ -511,6 +519,23 @@ impl EventHandler for Stage {
                 dt,
                 &mut self.sound_system
             );
+            
+            // Update motion blur based on player velocity
+            if self.input.boost && self.game.player.vel.length() > 50.0 {
+                // When boosting fast, create motion blur effect
+                let forward = self.game.player.v_forward();
+                let speed = self.game.player.vel.length();
+                
+                // Create directional blur based on forward movement
+                // Scale based on speed (stronger effect at higher speeds)
+                let blur_intensity = (speed / 500.0).min(0.15); // Cap at 0.15 for screen space
+                let blur_x = -forward.x * blur_intensity;
+                let blur_y = forward.z * blur_intensity;
+                
+                self.effects_manager.update_motion_blur_velocity([blur_x, blur_y]);
+            } else {
+                self.effects_manager.update_motion_blur_velocity([0.0, 0.0]);
+            }
             
             // Update trees based on player position
             self.game.update_trees(dt);
@@ -583,12 +608,7 @@ impl EventHandler for Stage {
         let view = self.camera.get_view_matrix(&self.game.player);
         let mvp = proj * view;
         
-        // Render
-        self.ctx.begin_default_pass(PassAction::Clear {
-            color: Some((0.0, 0.0, 0.0, 1.0)),
-            depth: Some(1.0),
-            stencil: None,
-        });
+        self.effects_manager.begin_frame(&mut *self.ctx);
         
         // Draw skybox first (behind everything)
         {
@@ -1376,7 +1396,8 @@ impl EventHandler for Stage {
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
-        self.ctx.end_render_pass();
+        self.effects_manager.apply_effects(&mut *self.ctx);
+        
         self.ctx.commit_frame();
     }
 
@@ -1408,12 +1429,7 @@ impl EventHandler for Stage {
                     window::set_window_size(1200, 900);
                 }
             }
-            KeyCode::Minus | KeyCode::KpSubtract => self.hud.zoom_out(),
-            KeyCode::Equal | KeyCode::KpAdd => self.hud.zoom_in(),
-            KeyCode::T => {
-                println!("GPUComplete terrain mode is the only available mode");
-            },
-            _ => {}
+            _ => self.effects_manager.key_down_event(keycode),
         }
     }
 

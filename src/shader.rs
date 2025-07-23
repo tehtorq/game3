@@ -9,6 +9,9 @@ use lazy_static::lazy_static;
 lazy_static! {
     pub static ref VERTEX_TERRAIN_SIMPLE: &'static str = *crate::shaders::modules::terrain::VERTEX_SIMPLE;
     pub static ref FRAGMENT_TERRAIN_SIMPLE: &'static str = *crate::shaders::modules::terrain::FRAGMENT_SIMPLE;
+    
+    pub static ref VERTEX_TILT_SHIFT: &'static str = crate::shaders::modules::tilt_shift::VERTEX;
+    pub static ref FRAGMENT_TILT_SHIFT: &'static str = crate::shaders::modules::tilt_shift::FRAGMENT;
     pub static ref VERTEX_TERRAIN: &'static str = *crate::shaders::modules::terrain::VERTEX_INSTANCED;
     pub static ref FRAGMENT_TERRAIN: &'static str = *crate::shaders::modules::terrain::FRAGMENT_INSTANCED;
 }
@@ -37,6 +40,22 @@ pub fn meta_volumetric_laser() -> ShaderMeta {
                 UniformDesc::new("laserRadius", UniformType::Float1),
                 UniformDesc::new("time", UniformType::Float1),
                 UniformDesc::new("cameraPos", UniformType::Float3),
+            ],
+        },
+    }
+}
+
+pub fn meta_tilt_shift() -> ShaderMeta {
+    ShaderMeta {
+        images: vec!["u_scene_texture".to_string()],
+        uniforms: UniformBlockLayout {
+            uniforms: vec![
+                UniformDesc::new("u_screen_size", UniformType::Float2),
+                UniformDesc::new("u_focus_position", UniformType::Float1),
+                UniformDesc::new("u_focus_scale", UniformType::Float1),
+                UniformDesc::new("u_blur_amount", UniformType::Float1),
+                UniformDesc::new("u_saturation", UniformType::Float1),
+                UniformDesc::new("u_time", UniformType::Float1),
             ],
         },
     }
