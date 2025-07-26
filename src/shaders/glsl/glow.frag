@@ -9,13 +9,20 @@ void main() {
     // Calculate distance to nearest edge
     float minBary = min(min(v_barycentric.x, v_barycentric.y), v_barycentric.z);
     
-    // Create a bright core with falloff
-    float intensity = 1.0 - minBary * 2.0;
-    intensity = max(0.0, intensity);
+    // Create glow that fades IN towards edges (opposite of normal)
+    // This creates a hazy aura around the bullet
+    float edgeDist = 1.0 - minBary * 3.0;
+    edgeDist = clamp(edgeDist, 0.0, 1.0);
     
-    // Add extra brightness to the center
-    float coreBrightness = 1.0 + intensity * 2.0;
+    // Smooth falloff for hazy appearance
+    float glow = pow(edgeDist, 2.0);
     
-    // Output bright, saturated color with additive blending
-    gl_FragColor = vec4(color * coreBrightness, intensity * 0.8);
+    // Make the center transparent and edges glowy
+    float alpha = glow * 0.6;
+    
+    // Bright, saturated color for the glow
+    vec3 glowColor = color * 2.0;
+    
+    // Output with alpha for hazy edges
+    gl_FragColor = vec4(glowColor, alpha);
 }

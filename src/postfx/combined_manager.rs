@@ -17,6 +17,7 @@ pub struct CombinedEffectsManager {
     // Effects
     tilt_shift: EffectPipeline,
     motion_blur: EffectPipeline,
+    bloom: EffectPipeline,
     
     // Final blit to screen
     blit_pipeline: Pipeline,
@@ -26,6 +27,7 @@ pub struct CombinedEffectsManager {
     effects_enabled: bool,
     tilt_shift_enabled: bool,
     motion_blur_enabled: bool,
+    bloom_enabled: bool,
     
     screen_width: u32,
     screen_height: u32,
@@ -201,6 +203,54 @@ impl CombinedEffectsManager {
             bindings: motion_blur_bindings,
         };
 
+        // Create bloom effect
+        let bloom_shader = ctx.new_shader(
+            ShaderSource::Glsl {
+                vertex: shaders::modules::postfx::bloom::VERTEX,
+                fragment: shaders::modules::postfx::bloom::FRAGMENT,
+            },
+            ShaderMeta {
+                images: vec!["u_scene_texture".to_string()],
+                uniforms: UniformBlockLayout {
+                    uniforms: vec![
+                        UniformDesc::new("u_screen_size", UniformType::Float2),
+                        UniformDesc::new("u_bloom_threshold", UniformType::Float1),
+                        UniformDesc::new("u_bloom_intensity", UniformType::Float1),
+                        UniformDesc::new("u_time", UniformType::Float1),
+                    ],
+                },
+            }
+        ).expect("Failed to create bloom shader");
+
+        let bloom_pipeline = ctx.new_pipeline(
+            &[BufferLayout {
+                step_func: VertexStep::PerVertex,
+                stride: 16,
+                ..Default::default()
+            }],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float2),
+                VertexAttribute::new("uv", VertexFormat::Float2),
+            ],
+            bloom_shader,
+            PipelineParams {
+                depth_test: Comparison::Never,
+                depth_write: false,
+                ..Default::default()
+            },
+        );
+
+        let bloom_bindings = Bindings {
+            vertex_buffers: vec![vertex_buffer.clone()],
+            index_buffer: index_buffer.clone(),
+            images: vec![scene_texture], // Will be updated dynamically
+        };
+
+        let bloom = EffectPipeline {
+            pipeline: bloom_pipeline,
+            bindings: bloom_bindings,
+        };
+
         // Create simple blit shader for final output
         let blit_shader = ctx.new_shader(
             ShaderSource::Glsl {
@@ -260,11 +310,13 @@ impl CombinedEffectsManager {
             pass_b,
             tilt_shift,
             motion_blur,
+            bloom,
             blit_pipeline,
             blit_bindings,
             effects_enabled: false,
             tilt_shift_enabled: false,
             motion_blur_enabled: false,
+            bloom_enabled: false,
             screen_width,
             screen_height,
             motion_blur_velocity: [0.0, 0.0],
@@ -364,6 +416,31 @@ impl CombinedEffectsManager {
             ctx.end_render_pass();
             
             current_source = current_target_texture;
+            use_a = !use_a;
+            current_target_pass = if use_a { Some(self.pass_a) } else { Some(self.pass_b) };
+            current_target_texture = if use_a { self.texture_a } else { self.texture_b };
+        }
+
+        // Apply bloom if enabled (always last for best effect)
+        if self.bloom_enabled {
+            self.bloom.bindings.images[0] = current_source;
+            
+            ctx.begin_pass(current_target_pass, PassAction::Nothing);
+            ctx.apply_pipeline(&self.bloom.pipeline);
+            ctx.apply_bindings(&self.bloom.bindings);
+            
+            let uniforms = BloomUniforms {
+                screen_size: [self.screen_width as f32, self.screen_height as f32],
+                bloom_threshold: 0.7,    // Only bloom bright objects
+                bloom_intensity: 1.5,    // Strong glow
+                time: 0.0,
+            };
+            
+            ctx.apply_uniforms(UniformsSource::table(&uniforms));
+            ctx.draw(0, 6, 1);
+            ctx.end_render_pass();
+            
+            current_source = current_target_texture;
         }
 
         // Blit final result to screen
@@ -381,9 +458,11 @@ impl CombinedEffectsManager {
         if self.effects_enabled {
             self.tilt_shift_enabled = true;
             self.motion_blur_enabled = true;
+            self.bloom_enabled = true;
         } else {
             self.tilt_shift_enabled = false;
             self.motion_blur_enabled = false;
+            self.bloom_enabled = false;
         }
         println!("All effects: {}", if self.effects_enabled { "ON" } else { "OFF" });
     }
@@ -398,8 +477,13 @@ impl CombinedEffectsManager {
         println!("Motion Blur: {}", if self.motion_blur_enabled { "ON" } else { "OFF" });
     }
 
+    pub fn toggle_bloom(&mut self) {
+        self.bloom_enabled = !self.bloom_enabled;
+        println!("Bloom: {}", if self.bloom_enabled { "ON" } else { "OFF" });
+    }
+
     fn any_effect_enabled(&self) -> bool {
-        self.tilt_shift_enabled || self.motion_blur_enabled
+        self.tilt_shift_enabled || self.motion_blur_enabled || self.bloom_enabled
     }
 
     fn resize(&mut self, ctx: &mut Context, width: u32, height: u32) {
@@ -471,6 +555,7 @@ impl CombinedEffectsManager {
             KeyCode::T => self.toggle_all(),
             KeyCode::Y => self.toggle_tilt_shift(),
             KeyCode::U => self.toggle_motion_blur(),
+            KeyCode::I => self.toggle_bloom(),
             _ => {}
         }
     }
@@ -495,5 +580,13 @@ struct MotionBlurUniforms {
     screen_size: [f32; 2],
     velocity: [f32; 2],
     blur_strength: f32,
+    time: f32,
+}
+
+#[repr(C)]
+struct BloomUniforms {
+    screen_size: [f32; 2],
+    bloom_threshold: f32,
+    bloom_intensity: f32,
     time: f32,
 }

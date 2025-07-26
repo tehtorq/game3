@@ -975,16 +975,9 @@ impl EventHandler for Stage {
                 };
                 
                 if player_instance_count > 0 {
-                    // First pass: Draw solid bullets
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.0]))); // Yellow
-                    self.ctx.draw(0, self.bullet_instance_system.index_count(), player_instance_count);
-                    
-                    // Second pass: Draw glow
-                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
-                    self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 0.2]))); // Bright yellow glow
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.5, 1.5, 0.0]))); // Bright yellow
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), player_instance_count);
                 }
                 
@@ -999,16 +992,9 @@ impl EventHandler for Stage {
                 };
                 
                 if enemy_instance_count > 0 {
-                    // First pass: Draw solid bullets
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.5, 0.0]))); // Orange
-                    self.ctx.draw(0, self.bullet_instance_system.index_count(), enemy_instance_count);
-                    
-                    // Second pass: Draw glow
-                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
-                    self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.3, 0.0]))); // Orange glow
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.5, 0.7, 0.0]))); // Bright orange
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), enemy_instance_count);
                 }
                 
@@ -1023,16 +1009,9 @@ impl EventHandler for Stage {
                 };
                 
                 if turret_instance_count > 0 {
-                    // First pass: Draw solid bullets
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // White
-                    self.ctx.draw(0, self.bullet_instance_system.index_count(), turret_instance_count);
-                    
-                    // Second pass: Draw glow
-                    self.ctx.apply_pipeline(&self.bullet_glow_pipeline);
-                    self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.8, 0.8, 1.0]))); // Blueish-white glow
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.8, 1.8, 2.0]))); // Bright white-blue
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), turret_instance_count);
                 }
             }
