@@ -152,15 +152,14 @@ varying vec3 v_pos;
 varying vec3 v_world_pos;
 
 void main() {
-    // Keep skybox centered on camera
-    vec3 pos = position + camera_pos;
-    gl_Position = mvp * vec4(pos, 1.0);
+    // For camera-relative rendering, skybox stays at origin
+    gl_Position = mvp * vec4(position, 1.0);
     
     // Make sure skybox is always behind everything
     gl_Position.z = gl_Position.w * 0.9999;
     
     v_pos = position;
-    v_world_pos = pos;
+    v_world_pos = position + camera_pos;
 }
 "#;
 

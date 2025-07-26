@@ -1,4 +1,4 @@
-use glam::{Vec3, Mat4};
+use glam::{Vec3, Vec4, Mat4};
 use crate::player::Player;
 use crate::constants::*;
 
@@ -58,16 +58,27 @@ impl Camera {
     }
     
     pub fn get_view_matrix(&self, _player: &Player) -> Mat4 {
-        // Position camera behind and above the player using smoothed values
-        let camera_offset = Vec3::new(
-            self.smooth_rotation.sin() * self.distance,
-            self.height,
-            self.smooth_rotation.cos() * self.distance
-        );
+        self.get_view_matrix_internal()
+    }
+    
+    fn get_view_matrix_internal(&self) -> Mat4 {
+        // Camera stays at origin but rotates to follow player
+        // This keeps the player in view while everything moves around us
         
-        let camera_pos = self.smooth_pos + camera_offset;
+        // Calculate where to look (at the player)
+        let player_relative_pos = self.smooth_pos - self.get_position();
         
-        // Look slightly ahead of the player
+        // Build view matrix that looks at player from origin
+        Mat4::look_at_lh(
+            Vec3::ZERO,           // Camera at origin
+            player_relative_pos,  // Look at player
+            Vec3::Y              // Up vector
+        )
+    }
+    
+    pub fn get_full_view_matrix(&self) -> Mat4 {
+        // Standard view matrix with translation for terrain
+        let camera_pos = self.get_position();
         let look_ahead = Vec3::new(
             -self.smooth_rotation.sin() * 50.0,
             0.0,
@@ -75,15 +86,17 @@ impl Camera {
         );
         let look_target = self.smooth_pos + look_ahead;
         
-        let up = Vec3::new(0.0, 1.0, 0.0);
-        
-        // Use left-handed coordinate system (this worked)
-        Mat4::look_at_lh(camera_pos, look_target, up)
+        Mat4::look_at_lh(camera_pos, look_target, Vec3::Y)
     }
 
     pub fn get_projection_matrix(&self, aspect: f32) -> Mat4 {
         // Use left-handed projection (this worked)
         Mat4::perspective_lh(CAMERA_FOV.to_radians(), aspect, CAMERA_NEAR, CAMERA_FAR)
+    }
+    
+    pub fn get_terrain_view_matrix(&self) -> Mat4 {
+        // Use the exact same view matrix as other objects
+        self.get_view_matrix_internal()
     }
     
     pub fn get_position(&self) -> Vec3 {

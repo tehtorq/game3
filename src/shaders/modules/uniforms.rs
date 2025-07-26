@@ -5,6 +5,8 @@ pub struct Uniforms {
     pub mvp: [[f32; 4]; 4],
     pub color: [f32; 3],
     pub _padding: f32,
+    pub camera_pos: [f32; 3],
+    pub _padding2: f32,
 }
 
 impl Uniforms {
@@ -13,6 +15,18 @@ impl Uniforms {
             mvp: mvp.to_cols_array_2d(),
             color,
             _padding: 0.0,
+            camera_pos: [0.0, 0.0, 0.0],
+            _padding2: 0.0,
+        }
+    }
+    
+    pub fn with_camera(mvp: Mat4, color: [f32; 3], camera_pos: Vec3) -> Self {
+        Self {
+            mvp: mvp.to_cols_array_2d(),
+            color,
+            _padding: 0.0,
+            camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z],
+            _padding2: 0.0,
         }
     }
 }

@@ -61,5 +61,7 @@ void main() {
     v_biome_color = get_biome_color(world_xz, morph_height);
     
     
-    gl_Position = mvp * vec4(v_world_pos, 1.0);
+    // Apply camera-relative positioning to avoid floating-point precision issues
+    vec3 relative_pos = v_world_pos - camera_pos;
+    gl_Position = mvp * vec4(relative_pos, 1.0);
 }

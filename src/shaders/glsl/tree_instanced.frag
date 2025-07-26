@@ -1,7 +1,9 @@
 #version 100
-precision mediump float;
+precision highp float;
 
+uniform mat4 mvp;
 uniform vec3 color;
+uniform vec3 camera_pos;
 
 varying vec3 v_barycentric;
 varying vec3 v_world_pos;

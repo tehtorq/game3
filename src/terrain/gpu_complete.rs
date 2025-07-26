@@ -159,7 +159,7 @@ impl TerrainGPUComplete {
         self.terrain_instance = Some(terrain);
     }
     
-    pub fn draw(&self, ctx: &mut dyn RenderingBackend, pipeline: &Pipeline, mvp: Mat4, base_color: [f32; 3], player_pos: Vec3, elapsed_time: f32) -> i32 {
+    pub fn draw(&self, ctx: &mut dyn RenderingBackend, pipeline: &Pipeline, mvp: Mat4, base_color: [f32; 3], camera_pos: Vec3, elapsed_time: f32) -> i32 {
         ctx.apply_pipeline(pipeline);
         
         // Create bindings with textures if available
@@ -179,10 +179,10 @@ impl TerrainGPUComplete {
         
         ctx.apply_bindings(&bindings);
         
-        // Grid follows player for infinite terrain
+        // Grid follows camera for infinite terrain
         let chunk_offset = [
-            (player_pos.x / self.grid_spacing).floor() * self.grid_spacing,
-            (player_pos.z / self.grid_spacing).floor() * self.grid_spacing
+            (camera_pos.x / self.grid_spacing).floor() * self.grid_spacing,
+            (camera_pos.z / self.grid_spacing).floor() * self.grid_spacing
         ];
         
         // Use elapsed time for water animation
@@ -195,7 +195,7 @@ impl TerrainGPUComplete {
             0.0, // No morphing for single LOD
             chunk_offset,
             self.grid_spacing,
-            player_pos,
+            camera_pos,
             time
         );
         

@@ -11,6 +11,12 @@ varying vec2 v_world_xz;
 varying float v_ao; // Ambient occlusion factor
 
 uniform mat4 mvp;
+uniform vec3 color;
+uniform float morph_factor;
+uniform vec2 chunk_offset;
+uniform float lod_scale;
+uniform vec3 camera_pos;
+uniform float time;
 uniform float terrain_scale;
 uniform float terrain_y_base;
 uniform sampler2D height_texture;
@@ -56,5 +62,7 @@ void main() {
     float height_normalized_ao = (world_pos.y + 300.0) / 600.0; // Normalize to 0-1 range
     v_ao = 0.5 + height_normalized_ao * 0.5; // Range from 0.5 to 1.0
     
-    gl_Position = mvp * vec4(world_pos, 1.0);
+    // Apply camera-relative positioning to avoid floating-point precision issues
+    vec3 relative_pos = world_pos - camera_pos;
+    gl_Position = mvp * vec4(relative_pos, 1.0);
 }

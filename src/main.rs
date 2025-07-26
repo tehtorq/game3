@@ -239,7 +239,7 @@ impl Stage {
                 vertex: shader::VERTEX_INSTANCED_BULLET,
                 fragment: shader::FRAGMENT_GLOW,
             },
-            shader::meta()
+            shaders::modules::bullet::meta()
         ).expect("Failed to create bullet glow shader");
         
         // Create volumetric laser shader and pipeline
@@ -608,6 +608,9 @@ impl EventHandler for Stage {
         let view = self.camera.get_view_matrix(&self.game.player);
         let mvp = proj * view;
         
+        // Get camera position for camera-relative rendering
+        let camera_pos = self.camera.get_position();
+        
         self.effects_manager.begin_frame(&mut *self.ctx);
         
         // Draw skybox first (behind everything)
@@ -618,12 +621,12 @@ impl EventHandler for Stage {
             }
         }
         
-        // Draw terrain
+        // Draw terrain with same view matrix as everything else
         let elapsed_time = (current_time - self.start_time) as f32;
         let terrain_triangles = if let Some(ref terrain) = self.terrain_gpu_complete {
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
-                terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], self.game.player.pos, elapsed_time)
+                terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], camera_pos, elapsed_time)
             }
         } else {
             0
@@ -664,7 +667,7 @@ impl EventHandler for Stage {
                         if let Some(bindings) = self.tree_bindings.get(tree_type) {
                             self.ctx.apply_pipeline(&self.tree_pipeline);
                             self.ctx.apply_bindings(bindings);
-                            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, *color)));
+                            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, *color, camera_pos)));
                             
                             if let Some((_, _, _, index_count)) = 
                                 self.tree_instance_system.get_buffers(*tree_type) {
@@ -697,7 +700,7 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             // Red-orange color for bases
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.3, 0.1])));
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 0.3, 0.1], camera_pos)));
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -769,7 +772,7 @@ impl EventHandler for Stage {
                 self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
                 self.ctx.apply_pipeline(&self.triangle_pipeline);
                 self.ctx.apply_bindings(&self.bindings);
-                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, *color)));
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, *color, camera_pos)));
                 self.ctx.draw(0, indices.len() as i32, 1);
             }
         }
@@ -831,7 +834,7 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             // White color for alert indicators
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0])));
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 1.0, 1.0], camera_pos)));
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -870,7 +873,7 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             // Pure white color for trails
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0])));
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 1.0, 1.0], camera_pos)));
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -889,7 +892,7 @@ impl EventHandler for Stage {
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
             self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 1.0]))); // Cyan
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [0.0, 1.0, 1.0], camera_pos))); // Cyan
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -950,7 +953,7 @@ impl EventHandler for Stage {
                 self.ctx.apply_bindings(&self.bindings);
                 // Blue-ish shield color with transparency effect based on shield strength
                 let shield_color = [0.0, 0.5 * self.game.player.shield, 1.0 * self.game.player.shield];
-                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, shield_color)));
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, shield_color, camera_pos)));
                 self.ctx.draw(0, indices.len() as i32, 1);
             }
         }
@@ -977,7 +980,7 @@ impl EventHandler for Stage {
                 if player_instance_count > 0 {
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.5, 1.5, 0.0]))); // Bright yellow
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.5, 1.5, 0.0], camera_pos))); // Bright yellow
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), player_instance_count);
                 }
                 
@@ -994,7 +997,7 @@ impl EventHandler for Stage {
                 if enemy_instance_count > 0 {
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.5, 0.7, 0.0]))); // Bright orange
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.5, 0.7, 0.0], camera_pos))); // Bright orange
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), enemy_instance_count);
                 }
                 
@@ -1011,7 +1014,7 @@ impl EventHandler for Stage {
                 if turret_instance_count > 0 {
                     self.ctx.apply_pipeline(&self.bullet_pipeline);
                     self.ctx.apply_bindings(&self.bullet_bindings);
-                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.8, 1.8, 2.0]))); // Bright white-blue
+                    self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.8, 1.8, 2.0], camera_pos))); // Bright white-blue
                     self.ctx.draw(0, self.bullet_instance_system.index_count(), turret_instance_count);
                 }
             }
@@ -1037,7 +1040,7 @@ impl EventHandler for Stage {
             self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
             // Use bright colors for particles - they'll fade with alpha in the shader
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.8, 0.3]))); // Orange-yellow
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 0.8, 0.3], camera_pos))); // Orange-yellow
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -1060,7 +1063,7 @@ impl EventHandler for Stage {
                 self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
                 self.ctx.apply_pipeline(&self.line_pipeline);
                 self.ctx.apply_bindings(&self.bindings);
-                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 1.0, 1.0]))); // White
+                self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 1.0, 1.0], camera_pos))); // White
                 self.ctx.draw(0, indices.len() as i32, 1);
             }
         }
@@ -1228,7 +1231,7 @@ impl EventHandler for Stage {
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
             self.ctx.apply_pipeline(&self.triangle_pipeline);
             self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [1.0, 0.2, 0.2]))); // Dark red
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [1.0, 0.2, 0.2], camera_pos))); // Dark red
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -1291,7 +1294,7 @@ impl EventHandler for Stage {
             self.ctx.buffer_update(self.bindings.index_buffer, BufferSource::slice(&indices));
             self.ctx.apply_pipeline(&self.line_pipeline);
             self.ctx.apply_bindings(&self.bindings);
-            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::new(mvp, [0.0, 1.0, 1.0]))); // Cyan for shields
+            self.ctx.apply_uniforms(UniformsSource::table(&shader::Uniforms::with_camera(mvp, [0.0, 1.0, 1.0], camera_pos))); // Cyan for shields
             self.ctx.draw(0, indices.len() as i32, 1);
         }
         
@@ -1325,9 +1328,12 @@ impl EventHandler for Stage {
             );
             let aim_point_3d = self.game.player.pos + aim_forward * aim_distance;
             
+            // Apply camera-relative transformation (same as in shaders)
+            let aim_point_relative = aim_point_3d - camera_pos;
+            
             // Project this 3D point back to screen space
             let view_proj = proj * view;
-            let aim_point_clip = view_proj * aim_point_3d.extend(1.0);
+            let aim_point_clip = view_proj * aim_point_relative.extend(1.0);
             
             // Convert to screen coordinates
             let crosshair_x = if aim_point_clip.w != 0.0 {
