@@ -165,14 +165,14 @@ impl Game {
         // Log player position every second
         self.position_log_timer += dt;
         if self.position_log_timer >= 1.0 {
-            println!("Player position: ({:.1}, {:.1}, {:.1})", 
-                self.player.pos.x, self.player.pos.y, self.player.pos.z);
+            // println!("Player position: ({:.1}, {:.1}, {:.1})", 
+            //     self.player.pos.x, self.player.pos.y, self.player.pos.z);
             self.position_log_timer = 0.0;
         }
         
         // Log enemy statistics every second
         self.enemy_stats_timer += dt;
-        if self.enemy_stats_timer >= 1.0 {
+        if false && self.enemy_stats_timer >= 1.0 { // Disabled
             self.print_enemy_stats();
             self.enemy_stats_timer = 0.0;
         }
@@ -411,7 +411,7 @@ impl Game {
             let elapsed = start_time.elapsed();
             
             // Log performance
-            println!("Trees: {} generated in {:?}", self.trees.len(), elapsed);
+            // println!("Trees: {} generated in {:?}", self.trees.len(), elapsed);
         }
     }
     

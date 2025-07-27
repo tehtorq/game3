@@ -593,8 +593,8 @@ impl EventHandler for Stage {
         // Print FPS once per second
         if self.fps_timer >= 1.0 && SHOW_FPS {
             let fps = self.frame_count as f64 / self.fps_timer;
-            println!("FPS: {:.1}", fps);
-            println!("Enemies: {}", self.game.enemies.len());
+            // println!("FPS: {:.1}", fps);
+            // println!("Enemies: {}", self.game.enemies.len());
             self.frame_count = 0;
             self.fps_timer = 0.0;
         }
@@ -611,6 +611,9 @@ impl EventHandler for Stage {
         // Get camera position for camera-relative rendering
         let camera_pos = self.camera.get_position();
         
+        // For terrain, we need the actual player position, not the camera behind them
+        let player_pos = self.game.player.pos;
+        
         self.effects_manager.begin_frame(&mut *self.ctx);
         
         // Draw skybox first (behind everything)
@@ -626,6 +629,7 @@ impl EventHandler for Stage {
         let terrain_triangles = if let Some(ref terrain) = self.terrain_gpu_complete {
             let ctx_ptr = &mut *self.ctx as *mut dyn RenderingBackend;
             unsafe {
+                // Use camera position like all other objects
                 terrain.draw(&mut *ctx_ptr, &self.terrain_simple_pipeline, mvp, [0.0, 1.0, 0.0], camera_pos, elapsed_time)
             }
         } else {
@@ -634,7 +638,7 @@ impl EventHandler for Stage {
         
         // Log terrain performance periodically
         if self.frame_count % 300 == 0 && terrain_triangles > 0 {
-            println!("Terrain triangles: {}", terrain_triangles);
+            // println!("Terrain triangles: {}", terrain_triangles);
         }
         
         // Draw trees using instancing (after terrain, before other objects)
@@ -657,7 +661,7 @@ impl EventHandler for Stage {
             
             // Log tree instance counts periodically
             if self.frame_count % 300 == 0 && !instance_counts.is_empty() {
-                println!("Tree instances: {:?}", instance_counts);
+                // println!("Tree instances: {:?}", instance_counts);
             }
             
             // Render each tree type with its instances

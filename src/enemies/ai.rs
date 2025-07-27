@@ -89,7 +89,7 @@ impl AIController {
                     self.alert_state = AlertState::Alert;
                     self.last_known_player_pos = player_pos;
                     self.alert_cooldown = 10.0;
-                    println!("Enemy spotted player!");
+                    // println!("Enemy spotted player!");
                 } else if self.can_hear_player(distance) {
                     self.alert_state = AlertState::Suspicious;
                     self.investigation_point = player_pos;

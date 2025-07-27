@@ -314,18 +314,18 @@ impl SoundSystem {
                     }
                     
                     if is_thrusting {
-                        println!("Thruster: ON (with audio)");
+                        // println!("Thruster: ON (with audio)");
                     } else {
-                        println!("Thruster: OFF (with audio)");
+                        // println!("Thruster: OFF (with audio)");
                     }
                 }
                 
                 #[cfg(not(feature = "audio"))]
                 {
                     if is_thrusting {
-                        println!("Thruster: ON (no audio)");
+                        // println!("Thruster: ON (no audio)");
                     } else {
-                        println!("Thruster: OFF (no audio)");
+                        // println!("Thruster: OFF (no audio)");
                     }
                 }
             }

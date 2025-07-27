@@ -1111,7 +1111,7 @@ impl Enemy {
                     self.alert_state = AlertState::Alert;
                     self.last_known_player_pos = player_pos;
                     self.alert_cooldown = 10.0; // Stay alert much longer
-                    println!("Enemy {:?} spotted player!", self.enemy_type);
+                    // println!("Enemy {:?} spotted player!", self.enemy_type);
                 } else if self.can_hear_player(distance) {
                     // Heard something suspicious
                     self.alert_state = AlertState::Suspicious;

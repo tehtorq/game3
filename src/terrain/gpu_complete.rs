@@ -66,7 +66,7 @@ impl TerrainGPUComplete {
             }
         }
         
-        println!("GPU Complete terrain: {} vertices, {} triangles", vertices.len(), indices.len() / 3);
+        // println!("GPU Complete terrain: {} vertices, {} triangles", vertices.len(), indices.len() / 3);
         
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -184,6 +184,17 @@ impl TerrainGPUComplete {
             (camera_pos.x / self.grid_spacing).floor() * self.grid_spacing,
             (camera_pos.z / self.grid_spacing).floor() * self.grid_spacing
         ];
+        
+        // Debug what we're passing to the shader
+        static mut FRAME: u32 = 0;
+        unsafe {
+            FRAME += 1;
+            if FRAME % 60 == 0 {
+                println!("Terrain: chunk_offset=[{:.1}, {:.1}], camera=({:.1}, {:.1}, {:.1})",
+                    chunk_offset[0], chunk_offset[1], 
+                    camera_pos.x, camera_pos.y, camera_pos.z);
+            }
+        }
         
         // Use elapsed time for water animation
         // Use modulo to keep time values reasonable and prevent precision issues

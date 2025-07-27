@@ -46,6 +46,7 @@ void main() {
     v_height = morph_height;
     
     // Keep original terrain height - don't clamp
+    // Fix: world_xz is vec2(x,z), so we need vec3(x, height, z)
     v_world_pos = vec3(world_xz.x, morph_height, world_xz.y);
     
     // Calculate normal - always use terrain normal
@@ -62,6 +63,10 @@ void main() {
     
     
     // Apply camera-relative positioning to avoid floating-point precision issues
-    vec3 relative_pos = v_world_pos - camera_pos;
+    // Swap Y and Z to fix coordinate system mismatch
+    // Negate X to fix horizontal movement direction
+    vec3 camera_corrected = vec3(-camera_pos.x, camera_pos.z, camera_pos.y);
+    vec3 relative_pos = v_world_pos - camera_corrected;
+    
     gl_Position = mvp * vec4(relative_pos, 1.0);
 }

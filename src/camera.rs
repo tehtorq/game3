@@ -62,18 +62,15 @@ impl Camera {
     }
     
     fn get_view_matrix_internal(&self) -> Mat4 {
-        // Camera stays at origin but rotates to follow player
-        // This keeps the player in view while everything moves around us
+        // Use standard view matrix but with camera at origin for camera-relative rendering
+        // Make sure we're looking horizontally (no pitch from camera height)
+        let look_target = Vec3::new(
+            -self.smooth_rotation.sin() * 50.0,
+            0.0,  // Keep Y at same level as camera
+            -self.smooth_rotation.cos() * 50.0
+        );
         
-        // Calculate where to look (at the player)
-        let player_relative_pos = self.smooth_pos - self.get_position();
-        
-        // Build view matrix that looks at player from origin
-        Mat4::look_at_lh(
-            Vec3::ZERO,           // Camera at origin
-            player_relative_pos,  // Look at player
-            Vec3::Y              // Up vector
-        )
+        Mat4::look_at_lh(Vec3::ZERO, look_target, Vec3::Y)
     }
     
     pub fn get_full_view_matrix(&self) -> Mat4 {
@@ -106,6 +103,18 @@ impl Camera {
             self.height,
             self.smooth_rotation.cos() * self.distance
         );
+        
+        // Debug: print camera offset vs player position
+        // static mut FRAME: u32 = 0;
+        // unsafe {
+        //     FRAME += 1;
+        //     if FRAME % 180 == 0 {
+        //         let final_pos = self.smooth_pos + camera_offset;
+        //         println!("Player pos: ({:.1}, {:.1}, {:.1}), Camera offset: ({:.1}, {:.1}, {:.1})",
+        //             self.smooth_pos.x, self.smooth_pos.y, self.smooth_pos.z,
+        //             camera_offset.x, camera_offset.y, camera_offset.z);
+        //     }
+        // }
         
         self.smooth_pos + camera_offset
     }
